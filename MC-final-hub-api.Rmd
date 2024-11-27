@@ -1,0 +1,57 @@
+---
+title: "MC-D607-HUD-API"
+author: "Marco Castro"
+date: "2024-11-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(jsonlite)
+library(httr2)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r read_key}
+source("credentials.R")
+```
+
+```{r get_articles_with_httr2}
+token
+
+domain <- "https://www.huduser.gov"
+method   <- "fmr" # alt method is il or mtspil
+resolution <- "data" # alt res is statedata or cbsa code for metroarea
+entity_id <- "5100399999" # fips code for county or 
+year <- "2024"
+path <-paste("hudapi/public/", method, "/", resolution, "/", entity_id,sep="")
+
+req <- request(domain) |> 
+  req_headers("Accept" = "application/json") |> 
+  req_auth_bearer_token(token) |>
+  req_url_path(path) |>
+  req_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763")
+
+req |> req_dry_run()
+```
+
+```{r get-response}
+resp <- req_perform(req) 
+
+json_resp <- resp |> 
+  resp_body_string() |>
+  fromJSON() 
+
+#convert to dataframe
+county_fmr <- as.data.frame(json_resp$data)
+
+
+glimpse(county_fmr)
+```
