@@ -21,17 +21,13 @@ This script scrapes the [Zillow] ("https://www.zillow.com/").
 ```{r init-scraper}
 
 # Read first search 
-
-#https://www.zillow.com/buffalo-ny-14201/rentals/?searchQueryState=%7B%22pagination%22%3A%7B%7D%2C%22isMapVisible%22%3Atrue%2C%22mapBounds%22%3A%7B%22north%22%3A42.908662514964306%2C%22south%22%3A42.8828821369165%2C%22east%22%3A-78.86731258184815%2C%22west%22%3A-78.90542140753175%7D%2C%22regionSelection%22%3A%5B%7B%22regionId%22%3A63458%2C%22regionType%22%3A7%7D%5D%2C%22filterState%22%3A%7B%22fr%22%3A%7B%22value%22%3Atrue%7D%2C%22fsba%22%3A%7B%22value%22%3Afalse%7D%2C%22fsbo%22%3A%7B%22value%22%3Afalse%7D%2C%22nc%22%3A%7B%22value%22%3Afalse%7D%2C%22cmsn%22%3A%7B%22value%22%3Afalse%7D%2C%22auc%22%3A%7B%22value%22%3Afalse%7D%2C%22fore%22%3A%7B%22value%22%3Afalse%7D%2C%22beds%22%3A%7B%22min%22%3A1%2C%22max%22%3A1%7D%7D%2C%22isListVisible%22%3Atrue%2C%22mapZoom%22%3A15%2C%22usersSearchTerm%22%3A%22Buffalo%20NY%2014201%22%7D
-
 user_agent <- "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763"
-domain <- "https://www.zillow.com"
+domain <- "https://www.realtor.com"
 city <- "buffalo"
 state <- "ny" 
 zip <- "14201"
 beds <- 2
-path <-paste(domain, "/", zip, "/rentals/", sep="") #, city, "-", state, "-"
-
+path <-paste(domain, "/apartments/", zip,  sep="") #, city, "-", state, "-" "/beds=", beds,
 
 set_config(add_headers(`User-Agent` = user_agent))
 
@@ -47,15 +43,67 @@ realestate_data <- throttled_GET(path)
 realestate_data
 
 # get the number of jobs per page
-listings <- realestate_data %>% 
-  html_element(xpath = '//div[@class="result-list-container"]' ) %>%  # placardContainer
-  html_text() 
+result_container <- realestate_data %>% 
+  html_element(xpath = '//div[@class="Layout_layout-container__vzkoA"]' )  %>% 
+  html_elements('section')
 
-listings
+result_container
+
+# grab the pagination list items
+#pagination <- result_container %>% 
+#  html_element(xpath = '//div[@class="search-pagination"]') %>% 
+#  html_text() 
+
+
+#pagination
+
+# get the total number of search result pages
+#last_page = as.numeric(pagination[length(pagination)]) + 1
+
+#listings <- result_container %>% 
+#  html_elements(xpath = '//div[@class="BasePropertyCard_propertyCardWrap__Z5y4p"]' ) %>%
+#  html_text() 
+
+# listings
 
 ```
 
 This section crawls through each search result page and grabs the unique job listing id. This will be used later to crawl the individual job listing page.
+
+```{r crawl-search-result-pages}
+
+# init the page counter
+current_page <- 1
+
+# init the page_ids data frame
+page_ids <- data.frame()
+
+# loop though all pages
+while (current_page < last_page) {
+
+    # This will concatenate the url depending on the page
+    page_url = str_c('https://www.reed.co.uk/jobs/full-time-data-scientist-jobs-in-london?proximity=1000&pageno=', current_page, sep="")
+    page_content = read_html(page_url)
+    
+    # This will get the url
+    page_id <- page_content %>% 
+      html_elements(xpath = '//article[@class="card job-card_jobCard__MkcJD"]') %>% 
+      html_nodes('header') %>% 
+      html_element('a') %>% 
+      html_attr('data-id')
+    
+    # remove all blank elements
+    page_id <- page_id[!is.na(page_id)]
+    
+    # This appends the data together
+    page_ids <- append(page_ids, page_id)
+  
+    # This tells us to go to the next page
+    current_page <- current_page + 1
+}
+
+
+```
 
 ```{r crawl-search-result-pages}
 
