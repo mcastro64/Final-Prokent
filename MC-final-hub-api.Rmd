@@ -14,6 +14,7 @@ library(httr)
 library(httr2)
 library(stringr)
 library(rvest)
+library(textutils)
 ```
 
 ## R Markdown
@@ -157,4 +158,98 @@ metro_fmr_clean <- metro_fmrs |>
 head(metro_fmr_clean, n=10)
 
 ```
+
+
+This script scrapes the [Trulia] ("https://www.trulia.com/").
+
+```{r init-scraper}
+
+# C1: Declare parser constants
+
+# init market rate tibble
+real_estate_df <- tibble(
+  zip_code = character(),
+  bedrooms = integer(),
+  market_rate = integer()
+)
+
+# custom function to remove misc chars
+cleanup_price <- function(s) {
+  t <- str_replace_all(s, "([$,])", "") #remove dollar signs and commas
+  x <- gsub("^([0-9]+).*", "\\1", t) #only return first group of integers
+  print(x)
+  return(as.integer(x))
+} 
+
+# global vars
+domain <- "https://www.trulia.com"
+
+# update user agents
+user_agent <- "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763"
+set_config(add_headers(`User-Agent` = user_agent))
+
+```
+
+```{r scrape-trulia}
+
+delay <- 103
+# custom function for delayed scraping
+throttled_GET <- slowly(
+  ~read_html(.),
+  rate = rate_delay(delay)
+)
+
+# C2: Scrape Real Estate Data
+
+# can be altered for multipage scraping
+beds <- 1
+current_page <- 1
+start <- 201
+end <- nrow(zip_codes)
+
+# loop through zip codes list
+for (i in start:end) {
+  # get zip code at current index
+  zip <- zip_codes[i,]$zip_code
+  # randomly set the delay in seconds
+  delay <- 60 + round(runif(1) * 30)
+  
+  print(delay)
+  # print current zip
+  print(zip)
+  
+  # build our path based on the current zip, beds and page vars 
+  path <- paste(domain, "/for_rent/", zip, "_zip/", beds, "_beds/", current_page, "_p/", sep="")
+  
+  # send path to our throttled function 
+  page_reponse <- throttled_GET(path)
+  
+  # find price from current page html
+  result_container <- page_reponse %>% 
+    html_element(xpath='//ul[@data-testid="search-result-list-container"]' )
+    listings <- result_container %>% 
+    html_elements(xpath = '//li//div[@data-testid="property-price"]' ) %>% 
+    html_text()  
+
+  # C3: Append to parsed real estate dataframe
+  # loop through all listing prices 
+  # and append to market rate tibble
+  for (s in listings)
+    real_estate_df <- real_estate_df |>
+      add_row(zip_code = zip, bedrooms = beds, market_rate = cleanup_price(s))
+
+}
+
+
+head(real_estate_df, n=10)
+```
+
+```{r dump_parsed_data }
+write_csv(real_estate_df, "trulia_data.csv")
+```
+
+
+
+
+
 

@@ -9,7 +9,6 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(httr)
-library(purrr)
 library(stringr)
 library(rvest)
 library(textutils)
@@ -17,66 +16,17 @@ library(textutils)
 
 ## Overview
 
-This script scrapes the [Zillow] ("https://www.zillow.com/").
+This script scrapes the [Trulia] ("https://www.trulia.com/").
 
-```{r init-scraper}
-
-# custom function for delayed scraping
-throttled_GET <- slowly(
-  ~read_html(.),
-  rate = rate_delay(2)
-)
-
-# global vars
-domain <- "https://www.zillow.com"
-zip <- "14201"
-beds <- 0
-
-# update user agents
-user_agent <- "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763"
-set_config(add_headers(`User-Agent` = user_agent))
-
-# Read first search 
-path <-paste(domain, "/", zip, "/rentals/", sep="") 
-realestate_data <- throttled_GET(path)
-
-```
-
-
-```{r read-html-on-page}
-
-# grab listings div from html on this page
-result_container <- realestate_data %>% 
-  html_element(xpath = '//div[@class="result-list-container"]' )
-
-# C2. grab the pagination list items
-pagination <- result_container %>% 
-  html_element(xpath = '//nav[@class="StyledPagination-c11n-8-107-0__sc-4uav85-0 dOdLEd"]') %>% 
-  html_elements(xpath = '//li[@class="PaginationNumberItem-c11n-8-107-0__sc-i6f8qs-0 lTbnm"]') %>% 
-  html_text() %>%
-  strsplit(" ")
-
-# get the total number of search result pages
-current_page <- 1
-last_page = as.numeric(pagination[length(pagination)]) + 1
-
-# C3: get the listings on this page
-listings <- result_container %>% 
-  html_element(xpath = 'ul' ) %>%   
-  html_elements(xpath = 'li' ) %>%
-  html_elements(xpath = '//span[@data-test="property-card-price"]' )  %>%
-  html_text()
-
-```
 
 ```{r clean-up-listing-price}
 
 
 # init market rate tibble
-market_rates <- tibble(
+real_estate_df <- tibble(
   zip_code = character(),
   bedrooms = integer(),
-  monthly_rent = integer()
+  market_rate = integer()
 )
 
 # custom function to remove misc chars
@@ -90,9 +40,8 @@ cleanup_price <- function(s) {
 # loop through all listing prices 
 # and append to market rate tibble
 for (s in listings)
-  market_rates <- market_rates |>
-    add_row(zip_code = zip, bedrooms = beds, monthly_rent = cleanup_price(s))
-
+  real_estate_df <- real_estate_df |>
+    add_row(zip_code = zip, bedrooms = beds, market_rate = cleanup_price(s))
 
 head(market_rates, n=10)
 ```
