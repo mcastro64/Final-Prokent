@@ -203,8 +203,8 @@ throttled_GET <- slowly(
 
 # can be altered for multipage scraping
 beds <- 1
-current_page <- 1
-start <- 201
+current_page <- 2
+start <- 1
 end <- nrow(zip_codes)
 
 # loop through zip codes list
@@ -237,7 +237,9 @@ for (i in start:end) {
   for (s in listings)
     real_estate_df <- real_estate_df |>
       add_row(zip_code = zip, bedrooms = beds, market_rate = cleanup_price(s))
-
+  
+  
+  write_csv(real_estate_df, "trulia_data.csv")
 }
 
 
