@@ -10,43 +10,39 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(jsonlite)
 library(tibble)
-library(httr)
 library(httr2)
 library(stringr)
 library(rvest)
 library(textutils)
-```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-
-```{r read_key}
-
-# A1: declare our global variables
+# Read in our API global key
 source("credentials.R")
-
-# the cities we will be analyzing
-#'Abilene', 'Albuquerque', 'Denver-Aurora-Lakewood', 
-target_cities <- c( 'Buffalo-Cheektowaga-Niagara Falls','San Diego-Carlsbad')
-
-
 ```
 
+## Fair Market Rents (FMR) vs Market Rate Rents
+
+This project aims to ascertain whether the market rate rental costs for 1 and 2 bedroom apartments are consistent with the federal government's [Fair Market Rents (FMR)](https://www.huduser.gov/periodicals/ushmc/winter98/summary-2.html) — the 40th percentile of gross rents for typical rental units paid by tenants that moved within the last 20 months. FMR is used to calculate benefits such as the Housing Choice Vouchers used to help unhoused individuals find permanent housing. 
+
+As an annually-released estimate, FMR data does not capture the real-time economic realities that drive local housing markets. This means that some individuals that are approved for housing assistance benefits are unable to find an apartment locally that they can pay for with their approved voucher amount based on their area's FMR. In other words, market rates tend to outpace FMR estimates when market conditions quickly drive rental prices up in certain areas. 
+
+This project uses FMR data pulled from HUD using their publicly available [API](https://www.huduser.gov/portal/dataset/fmr-api.html). Market rate data was scraped from the rental listing site [Trulia](http://trulia.com) in three distinct metropolitan areas: Atlanta, GA, Buffalo, NY and San Diego, CA to obtain an up-to-date snapshot of real rental costs that can be compared against data from HUD's FMR Dataset. The comparison will help to determine if the FMR data released earlier this year for fiscal year Oct 2024-Sept 2025 is still relevant to current housing costs in these areas.
+
+```{r declare-cities}
+# A1: declare the cities we will analyze 
+target_cities <- c('Atlanta-Sandy Springs-Roswell','Buffalo-Cheektowaga-Niagara Falls','San Diego-Carlsbad')
+```
+
+## A: Getting FMR data using the HUD API
+
+The section below declares the global variables and functions for to call the [HUD FMR & IL API](https://www.huduser.gov/portal/dataset/fmr-api.html) using the `httr2` package using a HUD API key (A2). 
 
 ```{r get_hud_data_with_httr2}
 
 # A2: Custom function to call HUD FMR & IL API
-# https://www.huduser.gov/portal/dataset/fmr-api.html
-
 call_hud <- function(endpoint) {
-  
   # declare constants
   domain <- "https://www.huduser.gov"
-  method   <- "fmr" # alt method is il or mtspil
+  mwethod   <- "fmr" # alt method is il or mtspil
   path <-paste("hudapi/public/", method, "/", endpoint,sep="")
   
   # init request
@@ -55,9 +51,6 @@ call_hud <- function(endpoint) {
     req_auth_bearer_token(token) |>
     req_url_path(path) |>
     req_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763")
-  
-  # test request
-  # req |> req_dry_run()
   
   # call api
   resp <- req_perform(req)
@@ -73,15 +66,17 @@ call_hud <- function(endpoint) {
 
 ```
 
-Next, we will fetch the list of Metropolitan Areas from HUD. This step will let us retrieve the `entity_id` which we will need later to retrieve the FMR for each zip code
+### Retrieving the Metro Ids
+
+The custom function `call_hud` is used in the section below (A3) to request the HUD metropolitan area id (`entity_id`) for each of our target cities. This id will then be used to retrieve the FMR for each of the zipcodes that make up the area as well as the estimate for the area overall. The request returns a json obj for all metropolitan areas. After converting the response to a dataframe (A4), we will need to separate the __area_name__ column to cities, states, and area type. Finally, we filter for using the target cities array declared earier.
 
 ```{r get-metro-area-ids}
-  
-  # B1: Fetch Metro Area Ids from API
+  # A3: Fetch Metro Area Ids from API
   metros <- call_hud("listMetroAreas")
 
-  # B2: cleanup and filter list of metro areas 
+  # A4: cleanup and filter list of metro areas 
   #     for target areas
+  as.data.frame(metros)
   metro_areas <- as.data.frame(metros) |>
     # split area_name col into city and type
     separate_wider_regex(
@@ -99,16 +94,18 @@ Next, we will fetch the list of Metropolitan Areas from HUD. This step will let 
 glimpse(metro_areas)  
 ```
 
-Now that we a dataframe for the metropolitan areas, with our the ids we can call the `data` method of HUD's API to retrieve the FMR values for each metropolitan are
+### Retrieving FMRs for Target Cities
+
+Now that we have the ids for the metropolitan areas, we can call the `data` method of HUD's API to retrieve the FMR values for each metropolitan area and its corresponding zip codes (A5). I created a custom function `get_metro_data` that requests the FMR estimates the API and clean up the response. This function is called from a loop that iterates through each of our target areas. Finally, the loop uses `rbind` to merge the dataframes for each target city into a single dataframe
 
 ```{r get-entity-data}
 
-# B3: Call, clean-up and merge metra area data
-
+# A5: Call, clean-up and merge metro area data
 # Custom function to call and clean up metro area data
 get_metro_data <- function(row) {
   # use "cbsa_code" col as entity_id for API call
   entity_resp <- call_hud(paste("data", row$cbsa_code, sep="/"))
+  print(entity_resp)
   # clean up data
   df <- as.tibble(entity_resp$data$basicdata) |>
     rename_all(~tolower(str_trim(str_replace_all(., "-", "_")))) |>
@@ -136,8 +133,12 @@ zip_codes <- metro_fmrs |>
 ```
 
 
+# Tidying the FMR data
+
+In section A6, I used `pivot_longer` to break up each FMR cost estimate into its own row broken up by apartment type in each apartment. I then used `mutate` to convert the bedroom classifications to an integer representation based on the number of bedrooms. For example, a studio was given a value of 0, `one_bedroom` was given a value of 1, etc. 
+
 ```{r tidy-fmr-data}
-# B4:  tidy data
+# A6:  tidy data
 metro_fmr_clean <- metro_fmrs |>
   pivot_longer(
     cols = studio:four_bedroom,
@@ -159,19 +160,20 @@ head(metro_fmr_clean, n=10)
 
 ```
 
+# B: Scraping Market Rate Data
 
 This script scrapes the [Trulia] ("https://www.trulia.com/").
 
 ```{r init-scraper}
 
-# C1: Declare parser constants
+# B1: Declare parser constants
 
 # init market rate tibble
-real_estate_df <- tibble(
-  zip_code = character(),
-  bedrooms = integer(),
-  market_rate = integer()
-)
+#real_estate_df <- tibble(
+#  zip_code = character(),
+#  bedrooms = integer(),
+#  market_rate = integer()
+#)
 
 # custom function to remove misc chars
 cleanup_price <- function(s) {
@@ -188,6 +190,7 @@ domain <- "https://www.trulia.com"
 user_agent <- "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763"
 set_config(add_headers(`User-Agent` = user_agent))
 
+
 ```
 
 ```{r scrape-trulia}
@@ -202,9 +205,9 @@ throttled_GET <- slowly(
 # C2: Scrape Real Estate Data
 
 # can be altered for multipage scraping
-beds <- 1
-current_page <- 2
-start <- 1
+beds <- 2
+current_page <- 1
+start <- 101
 end <- nrow(zip_codes)
 
 # loop through zip codes list
@@ -212,7 +215,7 @@ for (i in start:end) {
   # get zip code at current index
   zip <- zip_codes[i,]$zip_code
   # randomly set the delay in seconds
-  delay <- 60 + round(runif(1) * 30)
+  delay <- 45 + round(runif(1) * 25)
   
   print(delay)
   # print current zip
@@ -245,6 +248,8 @@ for (i in start:end) {
 
 head(real_estate_df, n=10)
 ```
+
+
 
 ```{r dump_parsed_data }
 write_csv(real_estate_df, "trulia_data.csv")
