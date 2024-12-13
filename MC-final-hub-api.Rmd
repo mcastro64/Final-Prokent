@@ -42,7 +42,7 @@ The section below declares the global variables and functions for to call the [H
 call_hud <- function(endpoint) {
   # declare constants
   domain <- "https://www.huduser.gov"
-  mwethod   <- "fmr" # alt method is il or mtspil
+  method   <- "fmr" # alt method is il or mtspil
   path <-paste("hudapi/public/", method, "/", endpoint,sep="")
   
   # init request
@@ -193,6 +193,13 @@ set_config(add_headers(`User-Agent` = user_agent))
 
 ```
 
+```{r}
+
+
+zip_codes <- zip_codes |>
+  filter(cbsa_code == 'METRO12060M12060')
+```
+
 ```{r scrape-trulia}
 
 delay <- 103
@@ -204,10 +211,12 @@ throttled_GET <- slowly(
 
 # C2: Scrape Real Estate Data
 
+
+
 # can be altered for multipage scraping
-beds <- 2
+beds <- 0
 current_page <- 1
-start <- 101
+start <- 1
 end <- nrow(zip_codes)
 
 # loop through zip codes list
