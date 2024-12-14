@@ -212,8 +212,10 @@ throttled_GET <- slowly(
 
 # C2: Scrape Real Estate Data
 
+
+
 # can be altered for multipage scraping
-beds <- 2
+beds <- 0
 current_page <- 1
 start <- 1
 end <- 1 #nrow(zip_codes)
