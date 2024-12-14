@@ -279,12 +279,15 @@ market_rates <- read_csv(
     col_names = TRUE, 
     col_types = cols(.default = col_character(), market_rate = "i", bedrooms = "i"),
     show_col_types = FALSE
-  )
+  ) |>
+  filter(
+    market_rate < 100000
+  ) 
   
 market_rate_by_zip_and_num_bds <- market_rates |>
   group_by(across(all_of(c("zip_code", "bedrooms")))) |>
   summarise(
-    avg_market_rate_rent = round(mean(market_rate)),
+    market = round(mean(market_rate)),
   )
 ```
 
@@ -295,7 +298,77 @@ market_rate_by_zip_and_num_bds <- market_rates |>
 
 ### C2: Combine FMR and Market Rate Dataframes By Zip Code
 combined_df_by_zip <- metro_fmr_by_zip_and_num_bds |>
-  right_join(market_rate_by_zip_and_num_bds, by= c('zip_code'='zip_code', 'bedrooms'='bedrooms'))
+  right_join(market_rate_by_zip_and_num_bds, by= c('zip_code'='zip_code', 'bedrooms'='bedrooms')) |>
+  mutate(bedrooms = as.factor(bedrooms))
+
+combined_df_by_zip_diffs <- combined_df_by_zip |>
+  mutate(
+    cost_difference = market - fmr,
+    at_or_below_fmr = fmr >= market
+  ) |>
+  select(-c(fmr, market))
+
+combined_df_by_zip_long <- combined_df_by_zip |>
+  pivot_longer(
+    cols = c(fmr, market),
+    names_to = c("type"),
+    values_to = "rent"
+  ) 
+```
+
+```{r}
+
+glimpse(combined_df_by_zip)
+count_diffs <- combined_df_by_zip_diffs |>
+  group_by(across(all_of(c("cbsa_code", "bedrooms", "at_or_below_fmr")))) |>
+  summarise(
+    count = n()
+  )
+
+count_diffs
+
+ggplot(combined_df_by_zip_diffs, aes(y=bedrooms, fill=at_or_below_fmr)) +
+  geom_bar(position = position_dodge()) +
+  facet_wrap(~cbsa_code, ncol=1)
+  
+```
+
+
+```{r}
+
+ggplot(combined_df_by_zip, aes(cost_difference)) +
+  geom_histogram() +
+  facet_grid(~cbsa_code, ncol=1) 
+
+  
+```
+
+```{r}
+
+ggplot(combined_df_by_zip_diffs, aes(cost_difference)) +
+  geom_histogram() +
+  facet_grid(vars(cbsa_code), vars(bedrooms)) 
+
+  
+```
+
+```{r}
+
+ggplot(combined_df_by_zip_diffs, aes(y=bedrooms, fill=at_or_below_fmr)) +
+  geom_bar(position = position_dodge()) +
+  facet_wrap(~cbsa_code, ncol=1)
+  
+```for (i in 1:nrow(metro_areas)) {
+  
+  df <- combined_df_by_zip_long |>
+    filter(cbsa_code == metro_areas[i,]$cbsa_code)
+  
+  rents_v_fmr <- ggplot(df, aes(x=zip_code, y=rent, color=type)) +
+    geom_point() +
+    facet_wrap(~bedrooms, ncol=1)
+  
+  print(rents_v_fmr) 
+}
 
 ```
 
