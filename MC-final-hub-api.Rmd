@@ -25,11 +25,12 @@ This project aims to ascertain whether the market rate rental costs for 1 and 2 
 
 As an annually-released estimate, FMR data does not capture the real-time economic realities that drive local housing markets. This means that some individuals that are approved for housing assistance benefits are unable to find an apartment locally that they can pay for with their approved voucher amount based on their area's FMR. In other words, market rates tend to outpace FMR estimates when market conditions quickly drive rental prices up in certain areas. 
 
-This project uses FMR data pulled from HUD using their publicly available [API](https://www.huduser.gov/portal/dataset/fmr-api.html). Market rate data was scraped from the rental listing site [Trulia](http://trulia.com) in three distinct metropolitan areas: Atlanta, GA, Buffalo, NY and San Diego, CA to obtain an up-to-date snapshot of real rental costs that can be compared against data from HUD's FMR Dataset. The comparison will help to determine if the FMR data released earlier this year for fiscal year Oct 2024-Sept 2025 is still relevant to current housing costs in these areas.
+This project uses FMR data pulled from HUD using their publicly available [API](https://www.huduser.gov/portal/dataset/fmr-api.html). Market rate data was scraped from the rental listing site [Trulia](http://trulia.com) in three distinct metropolitan areas: Atlanta, GA, Buffalo, NY and San Diego, CA to obtain an up-to-date snapshot of real rental costs that can be compared against data from HUD's FMR Dataset. The comparison will help to determine if the FMR data released earlier this year for fiscal year Oct 2024-Sept 2025 is still relevant to current housing costs in these areas. For the purposes of this project, we will work with data only for apartments with less than 3 bedrooms.
 
 ```{r declare-cities}
 # A1: declare the cities we will analyze 
 target_cities <- c('Atlanta-Sandy Springs-Roswell','Buffalo-Cheektowaga-Niagara Falls','San Diego-Carlsbad')
+max_bedrooms <- 3
 ```
 
 ## A: Getting FMR data using the HUD API
@@ -139,7 +140,7 @@ In section A6, I used `pivot_longer` to break up each FMR cost estimate into its
 
 ```{r tidy-fmr-data}
 # A6:  tidy data
-metro_fmr_clean <- metro_fmrs |>
+metro_fmr_by_zip_and_num_bds <- metro_fmrs |>
   pivot_longer(
     cols = studio:four_bedroom,
     names_to = c("bedrooms"),
@@ -154,9 +155,13 @@ metro_fmr_clean <- metro_fmrs |>
       bedrooms == 'four_bedroom' ~ as.integer(4)
     )
   ) |>
-  arrange(zip_code)
+  arrange(zip_code) |>
+  filter(bedrooms < max_bedrooms)
 
-head(metro_fmr_clean, n=10)
+metro_fmr_msa_by_num_bds <- metro_fmr_by_zip_and_num_bds |>
+  filter(zip_code == 'MSA level')
+
+head(metro_fmr_by_zip_and_num_bds, n=10)
 
 ```
 
@@ -193,12 +198,8 @@ set_config(add_headers(`User-Agent` = user_agent))
 
 ```
 
-```{r}
 
-
-zip_codes <- zip_codes |>
-  filter(cbsa_code == 'METRO12060M12060')
-```
+Trulia will block the parser if too many requests come in a short period of time from the same IP address. Once way to get around this was to implement a delayed query
 
 ```{r scrape-trulia}
 
@@ -217,7 +218,7 @@ throttled_GET <- slowly(
 beds <- 0
 current_page <- 1
 start <- 1
-end <- nrow(zip_codes)
+end <- 1 #nrow(zip_codes)
 
 # loop through zip codes list
 for (i in start:end) {
@@ -258,14 +259,75 @@ for (i in start:end) {
 head(real_estate_df, n=10)
 ```
 
+#### Saving parsed data
+
 
 
 ```{r dump_parsed_data }
 write_csv(real_estate_df, "trulia_data.csv")
 ```
 
+### C: Working with Parsed data
+
+```{r read-parsed-data}
+
+# C1: Read previously parsed file from Trulia
+# add mean for market rate data based on zipcode and # of bedrooms
+# then add metro ids 
+market_rates <- read_csv(
+    file = "trulia_data.csv", 
+    col_names = TRUE, 
+    col_types = cols(.default = col_character(), market_rate = "i", bedrooms = "i"),
+    show_col_types = FALSE
+  )
+  
+market_rate_by_zip_and_num_bds <- market_rates |>
+  group_by(across(all_of(c("zip_code", "bedrooms")))) |>
+  summarise(
+    avg_market_rate_rent = round(mean(market_rate)),
+  )
+```
 
 
+### C2: Combine FMR and Market Rate Dataframes By Zip Code
+
+```{r combine-dfs}
+
+### C2: Combine FMR and Market Rate Dataframes By Zip Code
+combined_df_by_zip <- metro_fmr_by_zip_and_num_bds |>
+  right_join(market_rate_by_zip_and_num_bds, by= c('zip_code'='zip_code', 'bedrooms'='bedrooms'))
+
+```
+
+
+### C3: Combine FMR and Market Rate for each MSA
+
+
+```{r calc-msa-avg-market-rent}
+
+### C3: Combine FMR and Market Rate for each MSA
+
+# calculate average market rate for MSA
+market_rate_msa_by_num_bds <- market_rates |>
+  mutate(
+    cbsa_code = case_when(
+      as.integer(zip_code) > 90000 ~  'METRO41740M41740',
+      as.integer(zip_code) < 20000 ~ 'METRO15380M15380',
+      TRUE ~ 'METRO12060M12060'
+    )
+  ) |>
+  group_by(across(all_of(c("cbsa_code", "bedrooms")))) |>
+  summarise(
+    avg_market_rate_rent = mean(market_rate)
+  )
+
+# join fmr and market rate dataframes at the MSA level
+combined_df_by_msa <- metro_fmr_msa_by_num_bds |>
+  right_join(market_rate_msa_by_num_bds, by=c("cbsa_code", "bedrooms"))
+
+head(combined_df_by_msa)
+
+```
 
 
 
