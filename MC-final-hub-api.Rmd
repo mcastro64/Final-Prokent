@@ -93,7 +93,6 @@ The custom function `call_hud` is used in the section below (A3) to request the 
     filter(area_name %in% target_cities) |>
     select(c('cbsa_code',  'area_name', 'state')) 
 
-  
 glimpse(metro_areas)  
 ```
 
@@ -312,9 +311,9 @@ head(combined_df_by_zip_and_type)
 
 ### Plotting the Distribution of Estimate Types
 
-Below kernel density estimate, which is a smoothed version of the histogram
+With the final Below kernel density estimate, which is a smoothed version of the histogram
 
-```{r histo-diffs, fig.height=8}
+```{r histo-diffs, fig.height=6}
 
 # distribution of fmr vs market reate
 ggplot(combined_df_by_zip_and_type, aes(rent, fill=fct_rev(type), color=fct_rev(type))) +
@@ -347,7 +346,7 @@ ggplot(combined_df_by_zip_and_type, aes(rent, fill=fct_rev(type), color=fct_rev(
 
 
 
-```{r calc-rent-diffs, fig.height=6}
+```{r calc-rent-diffs, fig.width=6, fig.height=4}
 
 # C3: Calculate Rent Differences by Zip
 # create df with the margin of error 
@@ -380,42 +379,8 @@ ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr))
   
 ```
 
-```{r histo-rents}
 
-mean_moe <- combined_df_by_zip_diffs |>
-  group_by(at_or_below_fmr) |> 
-  summarise(mean_margin_of_error =mean(margin_of_error)
-)
-
-ggplot(combined_df_by_zip_diffs, aes(margin_of_error, fill=at_or_below_fmr)) +
-  geom_vline(xintercept = 0, colour="white", size=1)  +
-  geom_histogram(bins = 50,  color="#e9ecef",  position = 'identity') +
-  geom_vline(data=mean_moe, aes(xintercept=mean_margin_of_error, col=at_or_below_fmr), linetype = "dotted") +
-  theme(
-    legend.position="top", 
-    plot.title = element_text(hjust = 0.5)
-  ) +
-  labs(
-    title = "Distribution of Dollar Difference between Market Rate and FMR Estimates",
-    x = "Dollar Difference",
-    y = "Counts"
-  ) +
-  scale_x_continuous(labels = scales::dollar_format()) + 
-  scale_fill_discrete(
-    name = element_blank(), 
-    labels=c('Above FMR', 'At or below FMR'),
-    guide = guide_legend(reverse = TRUE) 
-  ) +
-  scale_color_discrete(
-    name = element_blank(), 
-    labels=c('Mean for Above FMR', 'Mean for At or below FMR'),
-    guide = guide_legend(reverse = TRUE) 
-  ) +
-  facet_grid(vars(bedrooms), vars(area_name), scales = "free_x") 
-
-```
-
-```{r fig.height=6}
+```{r fig.height=5}
 ggplot(combined_df_by_zip_diffs, aes(abs(margin_of_error), fct_rev(bedrooms), fill=at_or_below_fmr)) +
   geom_boxplot(color="#666666") +
   theme(

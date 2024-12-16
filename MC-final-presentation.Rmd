@@ -1,0 +1,187 @@
+---
+title: "Final Presentation"
+author: "Marco Castro"
+date: "2024-12-16"
+output:
+  ioslides_presentation:
+    widescreen: true
+    smaller: true
+  beamer_presentation: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(jsonlite)
+library(tibble)
+library(httr)
+library(httr2)
+library(stringr)
+library(rvest)
+library(textutils)
+
+source("credentials.R")
+
+# constants
+target_cities <- c('Atlanta-Sandy Springs-Roswell','Buffalo-Cheektowaga-Niagara Falls','San Diego-Carlsbad')
+max_bedrooms <- 3
+
+
+```
+
+## Project Overview
+
+#### __Goal of the Project__
+
+Analyze if market rate apartment rents are consistent with federal defined [Fair Market Rents (FMR)](https://www.huduser.gov/periodicals/ushmc/winter98/summary-2.html) levels in three distinct metropolitan areas.
+
+#### __What is FMR?__
+
+-   FMR is the 40th percentile of gross rents for typical rental units paid by tenants that moved within the last 20 months.
+-   FMR provides an estimate for rents for the fiscal year starting Oct 2024-Sept 2025
+-   FMR is used to establish benefits such as the Housing Choice Vouchers used to help unhoused individuals find permanent housing.
+
+## Project Overview (cont.)
+
+#### __Potential Problem__
+FMR is an annually-released estimate that data does not capture the real-time economic realities that drive local housing markets.
+
+#### __Implications of Problem__
+Some individuals that are approved for housing assistance benefits are unable to find an apartment locally that they can pay for with their approved voucher amount based on their area's FMR. In other words, market rates tend to outpace FMR estimates when market conditions quickly drive rental prices up in certain areas.
+
+## About the Data
+
+#### __Data sources__
+
+-   FMR data pulled from HUD using their publicly available [API](https://www.huduser.gov/portal/dataset/fmr-api.html).
+-   Market rate data was scraped from the rental listing site [Trulia](http://trulia.com)
+
+#### __Narrowing our Data__
+
+-   Atlanta (GA), Buffalo (NY) and San Diego (CA) Metropolitan Areas
+-   Apartments less than 3 bedrooms
+
+
+## Working with the HUD API
+
+https://www.huduser.gov/portal/dataset/fmr-api.html
+
+```{r custom-api-func, echo=TRUE}
+
+# Custom function to call HUD FMR & IL API
+call_hud <- function(endpoint) {
+  
+  # init request
+  req <- request("https://www.huduser.gov") |>   #domain
+    req_headers("Accept" = "application/json") |> 
+    req_auth_bearer_token(token) |>
+    req_url_path(paste("hudapi/public/fmr/", endpoint,sep="")) |> #path
+    req_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763")
+  
+  # parse response
+  json_resp <- req_perform(req) |> 
+    resp_body_string() |>
+    fromJSON() 
+  
+  # return parsed response
+  return(json_resp) 
+}
+```
+
+## API Responses
+__Getting the Ids for the Metropolitan Areas__
+
+```{r get-metro-area-ids_single, echo=TRUE}
+metro_areas <- call_hud("listMetroAreas")
+```
+
+```{r get-metro-area-ids}
+
+  # A4: cleanup and filter list of metro areas 
+  #     for target areas
+  metro_areas <- as.data.frame(metro_areas) |>
+    # split area_name col into city and type
+    separate_wider_regex(
+      area_name, c(area_name= ".*", ",\\s", type=".*")
+    ) |>
+    # split type col into state and type
+    mutate(
+      state = substring(type,1,2),
+    ) |>
+    # filter by our target areas
+    filter(area_name %in% target_cities) |>
+    select(c('cbsa_code',  'area_name', 'state')) 
+
+glimpse(metro_areas)  
+```
+
+__Getting the FMR Data by Zip Code for our Target Metropolitan Areas__
+
+```{r call-hud-zip}
+# A5: Call, clean-up and merge metro area data
+# Custom function to call and clean up metro area data
+get_metro_data <- function(row) {
+  # use "cbsa_code" col as entity_id for API call
+  entity_resp <- call_hud(paste("data", row$cbsa_code, sep="/"))
+  
+  # clean up data
+  df <- as_tibble(entity_resp$data$basicdata) |>
+    rename_all(~tolower(str_trim(str_replace_all(., "-", "_")))) |>
+    rename(studio = efficiency) |>
+    mutate( 
+      area_name = row$area_name
+    ) |>
+    relocate(area_name, .before=zip_code) 
+}
+
+# init df with first row
+metro_fmrs <- tibble()
+```
+```{r call-hud-zip-2, echo=TRUE}
+for (i in 1:nrow(metro_areas)) {
+  metro_fmrs <- rbind(metro_fmrs, get_metro_data(metro_areas[i,]))
+}
+```
+```{r call-hud-zip-3}
+metro_fmrs <- metro_fmrs |>
+  filter(zip_code != 'MSA level') |>
+  select(-c('three_bedroom','four_bedroom'))
+  
+head(metro_fmrs)
+
+zip_codes <- metro_fmrs |>
+  select(c("area_name", "zip_code"))
+```
+
+## Tidying the FMR Data
+
+```{r tidy-fmr-data, echo=TRUE}
+metro_fmr_by_zip_and_num_bds <- metro_fmrs |>
+  pivot_longer(
+    cols = studio:two_bedroom,
+    names_to = c("bedrooms"),
+    values_to = "fmr"
+  ) |>
+  mutate(
+    bedrooms = case_when(
+      bedrooms == 'studio' ~ as.integer(0),
+      bedrooms == 'one_bedroom' ~ as.integer(1),
+      bedrooms == 'two_bedroom' ~ as.integer(2)
+    )
+  ) 
+```
+
+```{r tidy-fmr-data-2, echo=FALSE}
+metro_fmr_msa_by_num_bds <- metro_fmr_by_zip_and_num_bds |>
+  arrange(zip_code) |>
+  filter(bedrooms < max_bedrooms) |>
+  filter(zip_code == 'MSA level')
+
+head(metro_fmr_by_zip_and_num_bds)
+
+```
+
+## Scraping Trulia
+
+![Trulia](trulia.png)
