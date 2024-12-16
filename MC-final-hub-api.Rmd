@@ -2,7 +2,9 @@
 title: "MC-D607 Final Project HUD-API"
 author: "Marco Castro"
 date: "2024-11-26"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -78,7 +80,6 @@ The custom function `call_hud` is used in the section below (A3) to request the 
 
   # A4: cleanup and filter list of metro areas 
   #     for target areas
-  as.data.frame(metros)
   metro_areas <- as.data.frame(metros) |>
     # split area_name col into city and type
     separate_wider_regex(
@@ -92,7 +93,6 @@ The custom function `call_hud` is used in the section below (A3) to request the 
     filter(area_name %in% target_cities) |>
     select(c('cbsa_code',  'area_name', 'state')) 
 
-  
 glimpse(metro_areas)  
 ```
 
@@ -107,26 +107,23 @@ Now that we have the ids for the metropolitan areas, we can call the `data` meth
 get_metro_data <- function(row) {
   # use "cbsa_code" col as entity_id for API call
   entity_resp <- call_hud(paste("data", row$cbsa_code, sep="/"))
-  print(entity_resp)
   
   # clean up data
-  df <- as.tibble(entity_resp$data$basicdata) |>
+  df <- as_tibble(entity_resp$data$basicdata) |>
     rename_all(~tolower(str_trim(str_replace_all(., "-", "_")))) |>
     rename(studio = efficiency) |>
     mutate( 
-      #cbsa_code = row$cbsa_code,
       area_name = row$area_name
     ) |>
     relocate(area_name, .before=zip_code) 
 }
 
 # init df with first row
-metro_fmrs <- get_metro_data(metro_areas[1,])
+metro_fmrs <- tibble()
 
 # loop through all other metro areas
-for (i in 2:nrow(metro_areas)) {
-  df <- get_metro_data(metro_areas[i,])
-  metro_fmrs <- rbind(metro_fmrs, df)
+for (i in 1:nrow(metro_areas)) {
+  metro_fmrs <- rbind(metro_fmrs, get_metro_data(metro_areas[i,]))
 }
 
 head(metro_fmrs)
@@ -163,7 +160,7 @@ metro_fmr_by_zip_and_num_bds <- metro_fmrs |>
 metro_fmr_msa_by_num_bds <- metro_fmr_by_zip_and_num_bds |>
   filter(zip_code == 'MSA level')
 
-head(metro_fmr_by_zip_and_num_bds, n=10)
+head(metro_fmr_by_zip_and_num_bds)
 
 ```
 
@@ -187,6 +184,8 @@ real_estate_df <- tibble(
 # update user agents
 user_agent <- "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763"
 set_config(add_headers(`User-Agent` = user_agent))
+
+delay <- 10       # number of seconds to delay each GET request
 
 # custom function for delayed scraping
 throttled_GET <- slowly(
@@ -216,10 +215,9 @@ In the following section, we use a for loop to iterate through each of the zip c
 current_page <- 1 # page counter
 start <- 1        # start index 
 end <- 1          # end index. Use #nrow(zip_codes) to use zip_code length 
-delay <- 10       # number of seconds to delay each GET request
 
 # loop through zip codes list
-for (beds in 0:1) {
+for (beds in 0:0) {
   
   for (i in start:end) {
     # get zip code at current index
@@ -273,6 +271,7 @@ market_rates <- read_csv(
     show_col_types = FALSE
   ) |>
   filter(
+    bedrooms < 3 &
     market_rate < 10000 # remove outliers
   ) 
 
@@ -280,7 +279,7 @@ market_rates <- read_csv(
 market_rate_by_zip_and_num_bds <- market_rates |>
   group_by(across(all_of(c("zip_code", "bedrooms")))) |>
   summarise(
-    market = round(quantile(market_rate,probs=0.4))
+    market_rate = round(quantile(market_rate,probs=0.4))
   )
 ```
 
@@ -299,32 +298,38 @@ combined_df_by_zip <- metro_fmr_by_zip_and_num_bds |>
 # C4: pivot longer by estimate type
 combined_df_by_zip_and_type <- combined_df_by_zip |>
   pivot_longer(
-    cols = c(fmr, market),
+    cols = c(fmr, market_rate),
     names_to = c("type"),
     values_to = "rent"
-  ) 
+  ) |>
+  mutate(
+    type = str_replace_all(type, "_", " ")
+  )
 
 head(combined_df_by_zip_and_type)
 ```
 
 ### Plotting the Distribution of Estimate Types
 
-Below kernel density estimate, which is a smoothed version of the histogram
+With the final Below kernel density estimate, which is a smoothed version of the histogram
 
-```{r histo-diffs}
+```{r histo-diffs, fig.height=6}
 
 # distribution of fmr vs market reate
 ggplot(combined_df_by_zip_and_type, aes(rent, fill=fct_rev(type), color=fct_rev(type))) +
   geom_density(alpha = .3) +
   theme(
     legend.position = "top", 
-    plot.title = element_text(hjust = 0.5)
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
   ) + 
   labs(
     title = "Density of Average Rents by Estimate Type",
+    subtitle = "Faceted by Area and Apt. Size (# of Bedrooms)",
     x = "Average Rent",
     y = "Density"
   ) +
+  scale_x_continuous(labels = scales::dollar_format()) + 
   scale_fill_discrete(
     name = element_blank(), 
     labels=c('Market Rate', 'FMR'),
@@ -341,16 +346,16 @@ ggplot(combined_df_by_zip_and_type, aes(rent, fill=fct_rev(type), color=fct_rev(
 
 
 
-```{r}
+```{r calc-rent-diffs, fig.width=6, fig.height=4}
 
 # C3: Calculate Rent Differences by Zip
 # create df with the margin of error 
 combined_df_by_zip_diffs <- combined_df_by_zip |>
   mutate(
-    margin_of_error = market - fmr,
-    at_or_below_fmr = as.factor(fmr >= market)
+    margin_of_error = market_rate - fmr,
+    at_or_below_fmr = as.factor(fmr >= market_rate)
   ) |>
-  select(-c(fmr, market))
+  select(-c(fmr, market_rate))
 
 
 ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr)) +
@@ -360,7 +365,7 @@ ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr))
     plot.title = element_text(hjust = 0.5)
   ) +
   labs(
-    title = "Count of Apartments by Size",
+    title = "Count of Zipcodes by Estimate Type and Apartment Size",
     x = "# of Apartments",
     y = "Apartment Type (in # of bedrooms)"
   ) + 
@@ -375,77 +380,25 @@ ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr))
 ```
 
 
-```{r }
-ggplot(combined_df_by_zip_and_type, aes(rent, fct_rev(bedrooms), fill=fct_rev(type))) +
-  geom_boxplot(color="gray") +
-  theme(
-    legend.position="top", 
-    plot.title = element_text(hjust = 0.5)
-  ) +
-  labs(
-    title = "",
-    y = "Size of Apt. (# of Bedrooms)"
-  ) +
-  scale_fill_discrete(
-    name = element_blank(), 
-    labels=c('Above FMR', 'At or below FMR'),
-    guide = guide_legend(reverse = TRUE) 
-  ) +
-  facet_wrap(~area_name, ncol=1)
-  # facet_grid(vars(bedrooms), vars(area_name)) 
-```
-
-```{r histo-rents}
-
-mean_moe <- combined_df_by_zip_diffs |>
-  group_by(at_or_below_fmr) |> 
-  summarise(mean_margin_of_error =mean(margin_of_error)
-)
-
-ggplot(combined_df_by_zip_diffs, aes(margin_of_error, fill=at_or_below_fmr)) +
-  geom_vline(xintercept = 0, colour="white", size=1)  +
-  geom_histogram(bins = 50,  color="#e9ecef",  position = 'identity') +
-  geom_vline(data=mean_moe, aes(xintercept=mean_margin_of_error, col=at_or_below_fmr), linetype = "dotted") +
-  theme(
-    legend.position="top", 
-    plot.title = element_text(hjust = 0.5)
-  ) +
-  labs(
-    title = "Distribution of Dollar Difference between Market Rate and FMR Estimates",
-    x = "Dollar Difference",
-    y = "Counts"
-  ) +
-  scale_fill_discrete(
-    name = element_blank(), 
-    labels=c('Above FMR', 'At or below FMR'),
-    guide = guide_legend(reverse = TRUE) 
-  ) +
-  scale_color_discrete(
-    name = element_blank(), 
-    labels=c('Mean for Above FMR', 'Mean for At or below FMR'),
-    guide = guide_legend(reverse = TRUE) 
-  ) +
-  facet_grid(vars(bedrooms), vars(area_name)) 
-
-```
-
-```{r }
+```{r fig.height=5}
 ggplot(combined_df_by_zip_diffs, aes(abs(margin_of_error), fct_rev(bedrooms), fill=at_or_below_fmr)) +
-  geom_boxplot(color="gray") +
+  geom_boxplot(color="#666666") +
   theme(
     legend.position="top", 
     plot.title = element_text(hjust = 0.5)
   ) +
   labs(
-    title = "",
+    title = "Distribution of Absolute Dollar Difference Between Market Rate and FMR Estimates",
+    x = "Dollar Difference between Market Rate and FMR",
     y = "Size of Apt. (# of Bedrooms)"
   ) +
+  scale_x_continuous(labels = scales::dollar_format()) + 
   scale_fill_discrete(
     name = element_blank(), 
     labels=c('Above FMR', 'At or below FMR'),
     guide = guide_legend(reverse = TRUE) 
   ) +
-  facet_wrap(~area_name, ncol=1)
+  facet_wrap(~area_name, ncol=3, shrink=FALSE) 
   # facet_grid(vars(bedrooms), vars(area_name)) 
 ```
 
