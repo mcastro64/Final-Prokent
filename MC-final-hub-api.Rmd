@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(jsonlite)
 library(tibble)
+library(httr)
 library(httr2)
 library(stringr)
 library(rvest)
@@ -81,15 +82,15 @@ The custom function `call_hud` is used in the section below (A3) to request the 
   metro_areas <- as.data.frame(metros) |>
     # split area_name col into city and type
     separate_wider_regex(
-      area_name, c(cities= ".*", ",\\s", type=".*")
+      area_name, c(area_name= ".*", ",\\s", type=".*")
     ) |>
     # split type col into state and type
     mutate(
       state = substring(type,1,2),
     ) |>
     # filter by our target areas
-    filter(cities %in% target_cities) |>
-    select(c('cbsa_code', 'cities', 'state')) 
+    filter(area_name %in% target_cities) |>
+    select(c('cbsa_code',  'area_name', 'state')) 
 
   
 glimpse(metro_areas)  
@@ -107,14 +108,16 @@ get_metro_data <- function(row) {
   # use "cbsa_code" col as entity_id for API call
   entity_resp <- call_hud(paste("data", row$cbsa_code, sep="/"))
   print(entity_resp)
+  
   # clean up data
   df <- as.tibble(entity_resp$data$basicdata) |>
     rename_all(~tolower(str_trim(str_replace_all(., "-", "_")))) |>
     rename(studio = efficiency) |>
     mutate( 
-      cbsa_code = row$cbsa_code
+      #cbsa_code = row$cbsa_code,
+      area_name = row$area_name
     ) |>
-    relocate(cbsa_code, .before=zip_code) 
+    relocate(area_name, .before=zip_code) 
 }
 
 # init df with first row
@@ -130,11 +133,10 @@ head(metro_fmrs)
 
 zip_codes <- metro_fmrs |>
   filter(zip_code != 'MSA level') |>
-  select(c("cbsa_code", "zip_code"))
+  select(c("area_name", "zip_code"))
 ```
 
-
-# Tidying the FMR data
+### Tidying the FMR data
 
 In section A6, I used `pivot_longer` to break up each FMR cost estimate into its own row broken up by apartment type in each apartment. I then used `mutate` to convert the bedroom classifications to an integer representation based on the number of bedrooms. For example, a studio was given a value of 0, `one_bedroom` was given a value of 1, etc. 
 
@@ -165,20 +167,32 @@ head(metro_fmr_by_zip_and_num_bds, n=10)
 
 ```
 
-# B: Scraping Market Rate Data
+## B: Scraping Market Rate Data
 
-This script scrapes the [Trulia] ("https://www.trulia.com/").
+In this section, we use the `httr` package to scrape [Trulia]("https://www.trulia.com/"), a real estate listing portal, for rental listings in the zipcodes we retrieved for each of our target cities. In the block below (B1), we initialize the an empty tibble and declare the varible types that we will be using to populate with the scaped rental listing data. We also set our user agent headers to mimick a web browser. Finally, we declare to custom functions:
+1. __throttled_GET__: throttle the HTML requests to Trulia. This is used to send a delayedGET request using a timer using the `slowly` function in order to minimize possibly being blocked
+2. __cleanup_price__: converts the string value from Trulia to an integer by removing any non-numerical characters. For example, the string "$1,000/mo" would return 1000. 
 
 ```{r init-scraper}
 
 # B1: Declare parser constants
 
 # init market rate tibble
-#real_estate_df <- tibble(
-#  zip_code = character(),
-#  bedrooms = integer(),
-#  market_rate = integer()
-#)
+real_estate_df <- tibble(
+  zip_code = character(),
+  bedrooms = integer(),
+  market_rate = integer()
+)
+
+# update user agents
+user_agent <- "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763"
+set_config(add_headers(`User-Agent` = user_agent))
+
+# custom function for delayed scraping
+throttled_GET <- slowly(
+  ~read_html(.),
+  rate = rate_delay(delay)
+)
 
 # custom function to remove misc chars
 cleanup_price <- function(s) {
@@ -188,86 +202,64 @@ cleanup_price <- function(s) {
   return(as.integer(x))
 } 
 
-# global vars
-domain <- "https://www.trulia.com"
-
-# update user agents
-user_agent <- "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763"
-set_config(add_headers(`User-Agent` = user_agent))
-
-
 ```
 
+### Looping through our Zip Codes
 
-Trulia will block the parser if too many requests come in a short period of time from the same IP address. Once way to get around this was to implement a delayed query
+In the following section, we use a for loop to iterate through each of the zip codes retrieved from HUD for our target cities to retrieve current (B2). We set each zip code (`zip`), the number of bedrooms (`beds`), and a page counter (`current_page`) as paramaters for our GET request, which is called via the custom `throttled_GET` function (B3). Upon retrieving the HTML from our response, we use `html_element` to find all listings on the price, then save the monthly rental cost in a list `listings` (B4). We use another for loop  through this list and append the values as new rows in the `real_estate_df` tibble (B5). Finally, we save the results to a CSV called "trulia_data.csv" for future use (B6).
 
 ```{r scrape-trulia}
 
-delay <- 103
-# custom function for delayed scraping
-throttled_GET <- slowly(
-  ~read_html(.),
-  rate = rate_delay(delay)
-)
-
-# C2: Scrape Real Estate Data
-
-
+# B2: Scrape Real Estate Data
 
 # can be altered for multipage scraping
-beds <- 0
-current_page <- 1
-start <- 1
-end <- 1 #nrow(zip_codes)
+current_page <- 1 # page counter
+start <- 1        # start index 
+end <- 1          # end index. Use #nrow(zip_codes) to use zip_code length 
+delay <- 10       # number of seconds to delay each GET request
 
 # loop through zip codes list
-for (i in start:end) {
-  # get zip code at current index
-  zip <- zip_codes[i,]$zip_code
-  # randomly set the delay in seconds
-  delay <- 45 + round(runif(1) * 25)
+for (beds in 0:1) {
   
-  print(delay)
-  # print current zip
-  print(zip)
-  
-  # build our path based on the current zip, beds and page vars 
-  path <- paste(domain, "/for_rent/", zip, "_zip/", beds, "_beds/", current_page, "_p/", sep="")
-  
-  # send path to our throttled function 
-  page_reponse <- throttled_GET(path)
-  
-  # find price from current page html
-  result_container <- page_reponse %>% 
-    html_element(xpath='//ul[@data-testid="search-result-list-container"]' )
+  for (i in start:end) {
+    # get zip code at current index
+    zip <- zip_codes[i,]$zip_code
+    # randomly set the delay in seconds
+    delay <- 15 + round(runif(1) * 10)
+    
+    print(delay)
+    # print current zip
+    print(zip)
+    
+    # B3: build path based on the current zip, beds and page vars
+    # and send to our throttled GET request function 
+    page_reponse <- throttled_GET(paste("https://www.trulia.com/for_rent/", zip, "_zip/", beds, "_beds/", current_page, "_p/", sep=""))
+    
+    # find price from current page html
+    result_container <- page_reponse %>% 
+      html_element(xpath='//ul[@data-testid="search-result-list-container"]' )
+    
+    # B4: save our rental prices to Trulia
     listings <- result_container %>% 
-    html_elements(xpath = '//li//div[@data-testid="property-price"]' ) %>% 
-    html_text()  
+      html_elements(xpath = '//li//div[@data-testid="property-price"]' ) %>% 
+      html_text()  
 
-  # C3: Append to parsed real estate dataframe
-  # loop through all listing prices 
-  # and append to market rate tibble
-  for (s in listings)
-    real_estate_df <- real_estate_df |>
-      add_row(zip_code = zip, bedrooms = beds, market_rate = cleanup_price(s))
-  
-  
-  write_csv(real_estate_df, "trulia_data.csv")
+    # B5: loop through all listing prices 
+    # and append to market rate tibble
+    for (s in listings)
+      real_estate_df <- real_estate_df |>
+        add_row(zip_code = zip, bedrooms = beds, market_rate = cleanup_price(s))
+  }
 }
 
-
 head(real_estate_df, n=10)
+# B6: write rental listings to csv
+write_csv(real_estate_df, "trulia_data_temp.csv")
 ```
 
-#### Saving parsed data
+## C: Working with Combined Data
 
-
-
-```{r dump_parsed_data }
-write_csv(real_estate_df, "trulia_data.csv")
-```
-
-### C: Working with Parsed data
+In this section, we combine the FMR data we retrieved using HUD's API and the market rate data we scraped from Trulia. First, we read in the data scraped from Trulia from section B from the CSV file "trulia_data.csv" and filter out any major outliers (C1). Next we `group_by` using the zip codes and number of bedrooms and `summarise` to calculate the 40th percentile of rental costs for every type of apartment size within each zip code and assign the grouped results to the dataframe `market_rate_by_zip_and_num_bds`.
 
 ```{r read-parsed-data}
 
@@ -279,25 +271,184 @@ market_rates <- read_csv(
     col_names = TRUE, 
     col_types = cols(.default = col_character(), market_rate = "i", bedrooms = "i"),
     show_col_types = FALSE
-  )
-  
+  ) |>
+  filter(
+    market_rate < 10000 # remove outliers
+  ) 
+
+# C2: group by zip codes and # bedrooms
 market_rate_by_zip_and_num_bds <- market_rates |>
   group_by(across(all_of(c("zip_code", "bedrooms")))) |>
   summarise(
-    avg_market_rate_rent = round(mean(market_rate)),
+    market = round(quantile(market_rate,probs=0.4))
   )
 ```
 
+### Combining FMR and Market Rate Dataframes By Zip Code
 
-### C2: Combine FMR and Market Rate Dataframes By Zip Code
+Now that we have the calculations for the 40th percential of market rate rents, we can combine the data with the FMR data. We use the `right_join` function to join the `metro_fmr_by_zip_and_num_bds` dataframe to the `market_rate_by_zip_and_num_bds` dataframe by zip codes (C3). Because some of the zip codes did not have any active listings on the date we scraped Trulia, using `right_join` will ensure that only the zip codes that had listings will be preserved in our `combined_df_by_zip` dataframe. Next, we use `pivot_longer` to break up each estimated rental cost as a unique observation that can be grouped or filtered by area_name, zip code, apartment size (# of bedrooms), and estimate type (fmr vs market rate)
+
 
 ```{r combine-dfs}
 
-### C2: Combine FMR and Market Rate Dataframes By Zip Code
+### C3: Combine FMR and Market Rate Dataframes By Zip Code
 combined_df_by_zip <- metro_fmr_by_zip_and_num_bds |>
-  right_join(market_rate_by_zip_and_num_bds, by= c('zip_code'='zip_code', 'bedrooms'='bedrooms'))
+  right_join(market_rate_by_zip_and_num_bds, by= c('zip_code'='zip_code', 'bedrooms'='bedrooms')) |>
+  mutate(bedrooms = as.factor(bedrooms))
+
+# C4: pivot longer by estimate type
+combined_df_by_zip_and_type <- combined_df_by_zip |>
+  pivot_longer(
+    cols = c(fmr, market),
+    names_to = c("type"),
+    values_to = "rent"
+  ) 
+
+head(combined_df_by_zip_and_type)
+```
+
+### Plotting the Distribution of Estimate Types
+
+Below kernel density estimate, which is a smoothed version of the histogram
+
+```{r histo-diffs}
+
+# distribution of fmr vs market reate
+ggplot(combined_df_by_zip_and_type, aes(rent, fill=fct_rev(type), color=fct_rev(type))) +
+  geom_density(alpha = .3) +
+  theme(
+    legend.position = "top", 
+    plot.title = element_text(hjust = 0.5)
+  ) + 
+  labs(
+    title = "Density of Average Rents by Estimate Type",
+    x = "Average Rent",
+    y = "Density"
+  ) +
+  scale_fill_discrete(
+    name = element_blank(), 
+    labels=c('Market Rate', 'FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  scale_color_discrete(
+    name = element_blank(), 
+    labels=c('Market Rate', 'FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) + 
+  facet_grid(vars(bedrooms), vars(area_name))
 
 ```
+
+
+
+```{r}
+
+# C3: Calculate Rent Differences by Zip
+# create df with the margin of error 
+combined_df_by_zip_diffs <- combined_df_by_zip |>
+  mutate(
+    margin_of_error = market - fmr,
+    at_or_below_fmr = as.factor(fmr >= market)
+  ) |>
+  select(-c(fmr, market))
+
+
+ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr)) +
+  geom_bar(position = position_dodge()) +
+  theme(
+    legend.position = "top", 
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Count of Apartments by Size",
+    x = "# of Apartments",
+    y = "Apartment Type (in # of bedrooms)"
+  ) + 
+  scale_fill_discrete(
+    name = element_blank(), 
+    labels=c('Above FMR', 'At or below FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  facet_wrap(~area_name, ncol=1)
+#  facet_grid(vars(bedrooms), vars(area_name))
+  
+```
+
+
+```{r }
+ggplot(combined_df_by_zip_and_type, aes(rent, fct_rev(bedrooms), fill=fct_rev(type))) +
+  geom_boxplot(color="gray") +
+  theme(
+    legend.position="top", 
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "",
+    y = "Size of Apt. (# of Bedrooms)"
+  ) +
+  scale_fill_discrete(
+    name = element_blank(), 
+    labels=c('Above FMR', 'At or below FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  facet_wrap(~area_name, ncol=1)
+  # facet_grid(vars(bedrooms), vars(area_name)) 
+```
+
+```{r histo-rents}
+
+mean_moe <- combined_df_by_zip_diffs |>
+  group_by(at_or_below_fmr) |> 
+  summarise(mean_margin_of_error =mean(margin_of_error)
+)
+
+ggplot(combined_df_by_zip_diffs, aes(margin_of_error, fill=at_or_below_fmr)) +
+  geom_vline(xintercept = 0, colour="white", size=1)  +
+  geom_histogram(bins = 50,  color="#e9ecef",  position = 'identity') +
+  geom_vline(data=mean_moe, aes(xintercept=mean_margin_of_error, col=at_or_below_fmr), linetype = "dotted") +
+  theme(
+    legend.position="top", 
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Distribution of Dollar Difference between Market Rate and FMR Estimates",
+    x = "Dollar Difference",
+    y = "Counts"
+  ) +
+  scale_fill_discrete(
+    name = element_blank(), 
+    labels=c('Above FMR', 'At or below FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  scale_color_discrete(
+    name = element_blank(), 
+    labels=c('Mean for Above FMR', 'Mean for At or below FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  facet_grid(vars(bedrooms), vars(area_name)) 
+
+```
+
+```{r }
+ggplot(combined_df_by_zip_diffs, aes(abs(margin_of_error), fct_rev(bedrooms), fill=at_or_below_fmr)) +
+  geom_boxplot(color="gray") +
+  theme(
+    legend.position="top", 
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "",
+    y = "Size of Apt. (# of Bedrooms)"
+  ) +
+  scale_fill_discrete(
+    name = element_blank(), 
+    labels=c('Above FMR', 'At or below FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  facet_wrap(~area_name, ncol=1)
+  # facet_grid(vars(bedrooms), vars(area_name)) 
+```
+
 
 
 ### C3: Combine FMR and Market Rate for each MSA
@@ -310,22 +461,29 @@ combined_df_by_zip <- metro_fmr_by_zip_and_num_bds |>
 # calculate average market rate for MSA
 market_rate_msa_by_num_bds <- market_rates |>
   mutate(
-    cbsa_code = case_when(
-      as.integer(zip_code) > 90000 ~  'METRO41740M41740',
-      as.integer(zip_code) < 20000 ~ 'METRO15380M15380',
-      TRUE ~ 'METRO12060M12060'
+    area_name = case_when(
+      as.integer(zip_code) > 90000 ~ 'San Diego-Carlsbad',
+      as.integer(zip_code) < 20000 ~ 'Buffalo-Cheektowaga-Niagara Falls',
+      TRUE ~ 'Atlanta-Sandy Springs-Roswell'
     )
   ) |>
-  group_by(across(all_of(c("cbsa_code", "bedrooms")))) |>
+  group_by(across(all_of(c("area_name", "bedrooms")))) |>
   summarise(
-    avg_market_rate_rent = mean(market_rate)
+    market = mean(market_rate)
   )
 
 # join fmr and market rate dataframes at the MSA level
 combined_df_by_msa <- metro_fmr_msa_by_num_bds |>
-  right_join(market_rate_msa_by_num_bds, by=c("cbsa_code", "bedrooms"))
+  right_join(market_rate_msa_by_num_bds, by=c("area_name", "bedrooms"))
 
-head(combined_df_by_msa)
+combined_df_by_msa_long <- combined_df_by_msa |>
+  pivot_longer(
+    cols = c(fmr, market),
+    names_to = c("type"),
+    values_to = "rent"
+  )
+
+head(combined_df_by_msa_long)
 
 ```
 
