@@ -183,5 +183,256 @@ head(metro_fmr_by_zip_and_num_bds)
 ```
 
 ## Scraping Trulia
+```{r get-trulia, echo=TRUE}
+  page_reponse <- read_html(paste("https://www.trulia.com/for_rent/", 14201, "_zip/", 2, "_beds/", sep=""))
+```
+<div>
+![Trulia](trulia.png){#id .class width=49% height=49% float=left}
+![Trulia](scraper.png){#id .class width=50% height=50%}
+</div>
 
-![Trulia](trulia.png)
+## Scraping Trulia (Cont.)
+
+```{r init-scraper}
+
+# B1: Declare parser constants
+
+# init market rate tibble
+real_estate_df <- tibble(
+  zip_code = character(),
+  bedrooms = integer(),
+  market_rate = integer()
+)
+
+# update user agents
+user_agent <- "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/18.17763"
+set_config(add_headers(`User-Agent` = user_agent))
+
+delay <- 10       # number of seconds to delay each GET request
+
+# custom function for delayed scraping
+throttled_GET <- slowly(
+  ~read_html(.),
+  rate = rate_delay(delay)
+)
+
+# custom function to remove misc chars
+cleanup_price <- function(s) {
+  t <- str_replace_all(s, "([$,])", "") #remove dollar signs and commas
+  x <- gsub("^([0-9]+).*", "\\1", t) #only return first group of integers
+  return(as.integer(x))
+} 
+
+# B2: Scrape Real Estate Data
+
+# can be altered for multipage scraping
+current_page <- 1 # page counter
+start <- 1        # start index 
+end <- 1          # end index. Use #nrow(zip_codes) to use zip_code length 
+beds <-2
+
+  
+  for (i in start:end) {
+    # get zip code at current index
+    zip <- zip_codes[i,]$zip_code
+    
+    # B3: build path based on the current zip, beds and page vars
+    # and send to our throttled GET request function 
+    page_reponse <- throttled_GET(paste("https://www.trulia.com/for_rent/", zip, "_zip/", beds, "_beds/", current_page, "_p/", sep=""))
+    
+    # find price from current page html
+    result_container <- page_reponse %>% 
+      html_element(xpath='//ul[@data-testid="search-result-list-container"]' )
+    
+    # B4: save our rental prices to Trulia
+    listings <- result_container %>% 
+      html_elements(xpath = '//li//div[@data-testid="property-price"]' ) %>% 
+      html_text()  
+
+    # B5: loop through all listing prices 
+    # and append to market rate tibble
+    for (s in listings)
+      real_estate_df <- real_estate_df |>
+        add_row(zip_code = zip, bedrooms = beds, market_rate = cleanup_price(s))
+  }
+
+
+head(real_estate_df, n=10)
+```
+
+## Calculating th 40th Percentile for Market Rates
+
+```{r read-parsed-data}
+
+# C1: Read previously parsed file from Trulia
+# add mean for market rate data based on zipcode and # of bedrooms
+# then add metro ids 
+market_rates <- read_csv(
+    file = "trulia_data.csv", 
+    col_names = TRUE, 
+    col_types = cols(.default = col_character(), market_rate = "i", bedrooms = "i"),
+    show_col_types = FALSE
+  ) |>
+  filter(
+    bedrooms < 3 &
+    market_rate < 10000 # remove outliers
+  ) 
+```
+```{r group-and-summarise, echo=TRUE, warning = FALSE}
+# group by zip codes and # bedrooms
+market_rate_by_zip_and_num_bds <- market_rates |>
+  group_by(across(all_of(c("zip_code", "bedrooms")))) |>
+  summarise(
+    market_rate = round(quantile(market_rate,probs=0.4))
+  )
+
+head(market_rate_by_zip_and_num_bds)
+```
+## Joining dataframes
+
+```{r combine-dfs, echo=TRUE}
+# Combine FMR and Market Rate Dataframes By Zip Code
+combined_df_by_zip <- metro_fmr_by_zip_and_num_bds |>
+  right_join(market_rate_by_zip_and_num_bds, by= c('zip_code'='zip_code', 'bedrooms'='bedrooms')) |>
+  mutate(bedrooms = as.factor(bedrooms))
+
+# C4: pivot longer by estimate type
+combined_df_by_zip_and_type <- combined_df_by_zip |>
+  pivot_longer(
+    cols = c(fmr, market_rate),
+    names_to = c("type"),
+    values_to = "rent"
+  )
+
+```
+```{r cleaning-up-df}
+combined_df_by_zip_and_type <- combined_df_by_zip_and_type |>
+  mutate(
+    type = str_replace_all(type, "_", " ")
+  )
+
+head(combined_df_by_zip_and_type)
+```
+
+## Plotting the Distribution of Estimate Types
+
+```{r histo-diffs, fig.width=10, fig.height=5, warning=FALSE, message=FALSE}
+
+mean_rents <- combined_df_by_zip_and_type |>
+  group_by(type, area_name, bedrooms) |> 
+  summarise(mean_rent= mean(rent)
+)
+
+# distribution of fmr vs market reate
+ggplot(combined_df_by_zip_and_type, aes(rent, fill=fct_rev(type), color=fct_rev(type))) +
+  geom_density(alpha = .3) +
+  geom_vline(data=mean_rents, aes(xintercept=mean_rent, col=type), linetype = "twodash") +
+  theme( 
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) + 
+  labs(
+    title = "Density of Average Rents by Estimate Type",
+    subtitle = "Faceted by Area and Apt. Size (# of Bedrooms)",
+    x = "Average Rent",
+    y = "Density"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format()) + 
+  scale_fill_discrete(
+    name = element_blank(), 
+    labels=c('Market Rate', 'FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  scale_color_discrete(
+    name = element_blank(), 
+    labels=c('Market Rate', 'FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) + 
+  facet_grid(vars(bedrooms), vars(area_name))
+
+```
+
+## Count of Zip Codes for Each Estimate Type
+
+```{r calc-rent-diffs, fig.width=10, fig.height=4, message=FALSE, warning=FALSE}
+
+# Calculate Rent Differences by Zip
+# create df with the margin of error 
+combined_df_by_zip_diffs <- combined_df_by_zip |>
+  mutate(
+    margin_of_error = market_rate - fmr,
+    at_or_below_fmr = as.factor(fmr >= market_rate)
+  ) |>
+  select(-c(fmr, market_rate))
+
+# Counts by Estimate Type
+counts_by_estimate_type <- combined_df_by_zip_diffs |>
+  group_by(area_name, bedrooms, at_or_below_fmr) |>
+  summarise(
+    count_type =  n(),
+  ) |>
+  ungroup() |>
+  arrange(area_name, bedrooms, desc(at_or_below_fmr))
+
+# calc total counts
+combined_df_by_zip_diffs_total_counts <- combined_df_by_zip_diffs |>
+  group_by(area_name, bedrooms) |>
+  summarise(
+    count_total = n(),
+  ) |>
+  ungroup() 
+
+# calculate percent of type per group
+counts_by_estimate_type <- counts_by_estimate_type |>
+  left_join(combined_df_by_zip_diffs_total_counts, by=c("area_name", "bedrooms")) |>
+  mutate(
+    type_ratio = count_type / count_total
+  ) 
+
+ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr)) +
+  geom_bar(position = position_dodge()) +
+  #geom_text(stat='count', aes(label = after_stat(count)), hjust=-.3, position = position_dodge(width=0.9),  size=3) +
+  geom_text(data=counts_by_estimate_type, mapping = aes(label = paste(count_type, " (", round(type_ratio * 100, 1), "%)", sep=""), x = count_type), stat="identity", hjust=-.1, position = position_dodge(width=0.9),  size=2.5) + 
+  theme(
+    legend.position = "top", 
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Count of Zipcodes by Estimate Type and Apartment Size",
+    x = "# of Apartments",
+    y = "Apartment Type (in # of bedrooms)"
+  ) + 
+  scale_x_continuous(expand = c(0, 55)) +
+  scale_fill_discrete(
+    name = element_blank(), 
+    labels=c('Above FMR', 'At or below FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  facet_wrap(~area_name, ncol=3)
+#  facet_grid(vars(bedrooms), vars(area_name))
+  
+```
+
+## Absolute Dollar Difference
+
+```{r dollar-diff, fig.width=10, fig.height=5}
+ggplot(combined_df_by_zip_diffs, aes(abs(margin_of_error), fct_rev(bedrooms), fill=at_or_below_fmr)) +
+  geom_boxplot(color="#666666") +
+  theme(
+    legend.position="top", 
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Distribution of Absolute Dollar Difference Between Market Rate and FMR Estimates",
+    x = "Dollar Difference between Market Rate and FMR",
+    y = "Size of Apt. (# of Bedrooms)"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format()) + 
+  scale_fill_discrete(
+    name = element_blank(), 
+    labels=c('Above FMR', 'At or below FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  facet_wrap(~area_name, ncol=3, shrink=FALSE) 
+  # facet_grid(vars(bedrooms), vars(area_name)) 
+```

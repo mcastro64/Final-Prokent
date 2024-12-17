@@ -3,8 +3,8 @@ title: "MC-D607 Final Project HUD-API"
 author: "Marco Castro"
 date: "2024-11-26"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -24,9 +24,9 @@ source("credentials.R")
 
 ## Fair Market Rents (FMR) vs Market Rate Rents
 
-This project aims to ascertain whether the market rate rental costs for 1 and 2 bedroom apartments are consistent with the federal government's [Fair Market Rents (FMR)](https://www.huduser.gov/periodicals/ushmc/winter98/summary-2.html) — the 40th percentile of gross rents for typical rental units paid by tenants that moved within the last 20 months. FMR is used to calculate benefits such as the Housing Choice Vouchers used to help unhoused individuals find permanent housing. 
+This project aims to ascertain whether the market rate rental costs for 1 and 2 bedroom apartments are consistent with the federal government's [Fair Market Rents (FMR)](https://www.huduser.gov/periodicals/ushmc/winter98/summary-2.html) — the 40th percentile of gross rents for typical rental units paid by tenants that moved within the last 20 months. FMR is used to calculate benefits such as the Housing Choice Vouchers used to help unhoused individuals find permanent housing.
 
-As an annually-released estimate, FMR data does not capture the real-time economic realities that drive local housing markets. This means that some individuals that are approved for housing assistance benefits are unable to find an apartment locally that they can pay for with their approved voucher amount based on their area's FMR. In other words, market rates tend to outpace FMR estimates when market conditions quickly drive rental prices up in certain areas. 
+As an annually-released estimate, FMR data does not capture the real-time economic realities that drive local housing markets. This means that some individuals that are approved for housing assistance benefits are unable to find an apartment locally that they can pay for with their approved voucher amount based on their area's FMR. In other words, market rates tend to outpace FMR estimates when market conditions quickly drive rental prices up in certain areas.
 
 This project uses FMR data pulled from HUD using their publicly available [API](https://www.huduser.gov/portal/dataset/fmr-api.html). Market rate data was scraped from the rental listing site [Trulia](http://trulia.com) in three distinct metropolitan areas: Atlanta, GA, Buffalo, NY and San Diego, CA to obtain an up-to-date snapshot of real rental costs that can be compared against data from HUD's FMR Dataset. The comparison will help to determine if the FMR data released earlier this year for fiscal year Oct 2024-Sept 2025 is still relevant to current housing costs in these areas. For the purposes of this project, we will work with data only for apartments with less than 3 bedrooms.
 
@@ -38,7 +38,7 @@ max_bedrooms <- 3
 
 ## A: Getting FMR data using the HUD API
 
-The section below declares the global variables and functions for to call the [HUD FMR & IL API](https://www.huduser.gov/portal/dataset/fmr-api.html) using the `httr2` package using a HUD API key (A2). 
+The section below declares the global variables and functions for to call the [HUD FMR & IL API](https://www.huduser.gov/portal/dataset/fmr-api.html) using the `httr2` package using a HUD API key (A2).
 
 ```{r get_hud_data_with_httr2}
 
@@ -72,7 +72,7 @@ call_hud <- function(endpoint) {
 
 ### Retrieving the Metro Ids
 
-The custom function `call_hud` is used in the section below (A3) to request the HUD metropolitan area id (`entity_id`) for each of our target cities. This id will then be used to retrieve the FMR for each of the zipcodes that make up the area as well as the estimate for the area overall. The request returns a json obj for all metropolitan areas. After converting the response to a dataframe (A4), we will need to separate the __area_name__ column to cities, states, and area type. Finally, we filter for using the target cities array declared earier.
+The custom function `call_hud` is used in the section below (A3) to request the HUD metropolitan area id (`entity_id`) for each of our target cities. This id will then be used to retrieve the FMR for each of the zipcodes that make up the area as well as the estimate for the area overall. The request returns a json obj for all metropolitan areas. After converting the response to a dataframe (A4), we will need to separate the **area_name** column to cities, states, and area type. Finally, we filter for using the target cities array declared earier.
 
 ```{r get-metro-area-ids}
   # A3: Fetch Metro Area Ids from API
@@ -135,7 +135,7 @@ zip_codes <- metro_fmrs |>
 
 ### Tidying the FMR data
 
-In section A6, I used `pivot_longer` to break up each FMR cost estimate into its own row broken up by apartment type in each apartment. I then used `mutate` to convert the bedroom classifications to an integer representation based on the number of bedrooms. For example, a studio was given a value of 0, `one_bedroom` was given a value of 1, etc. 
+In section A6, I used `pivot_longer` to break up each FMR cost estimate into its own row broken up by apartment type in each apartment. I then used `mutate` to convert the bedroom classifications to an integer representation based on the number of bedrooms. For example, a studio was given a value of 0, `one_bedroom` was given a value of 1, etc.
 
 ```{r tidy-fmr-data}
 # A6:  tidy data
@@ -166,9 +166,7 @@ head(metro_fmr_by_zip_and_num_bds)
 
 ## B: Scraping Market Rate Data
 
-In this section, we use the `httr` package to scrape [Trulia]("https://www.trulia.com/"), a real estate listing portal, for rental listings in the zipcodes we retrieved for each of our target cities. In the block below (B1), we initialize the an empty tibble and declare the varible types that we will be using to populate with the scaped rental listing data. We also set our user agent headers to mimick a web browser. Finally, we declare to custom functions:
-1. __throttled_GET__: throttle the HTML requests to Trulia. This is used to send a delayedGET request using a timer using the `slowly` function in order to minimize possibly being blocked
-2. __cleanup_price__: converts the string value from Trulia to an integer by removing any non-numerical characters. For example, the string "$1,000/mo" would return 1000. 
+In this section, we use the `httr` package to scrape [Trulia](%22https://www.trulia.com/%22), a real estate listing portal, for rental listings in the zipcodes we retrieved for each of our target cities. In the block below (B1), we initialize the an empty tibble and declare the varible types that we will be using to populate with the scaped rental listing data. We also set our user agent headers to mimick a web browser. Finally, we declare to custom functions: 1. **throttled_GET**: throttle the HTML requests to Trulia. This is used to send a delayedGET request using a timer using the `slowly` function in order to minimize possibly being blocked 2. **cleanup_price**: converts the string value from Trulia to an integer by removing any non-numerical characters. For example, the string "\$1,000/mo" would return 1000.
 
 ```{r init-scraper}
 
@@ -197,7 +195,6 @@ throttled_GET <- slowly(
 cleanup_price <- function(s) {
   t <- str_replace_all(s, "([$,])", "") #remove dollar signs and commas
   x <- gsub("^([0-9]+).*", "\\1", t) #only return first group of integers
-  print(x)
   return(as.integer(x))
 } 
 
@@ -205,7 +202,7 @@ cleanup_price <- function(s) {
 
 ### Looping through our Zip Codes
 
-In the following section, we use a for loop to iterate through each of the zip codes retrieved from HUD for our target cities to retrieve current (B2). We set each zip code (`zip`), the number of bedrooms (`beds`), and a page counter (`current_page`) as paramaters for our GET request, which is called via the custom `throttled_GET` function (B3). Upon retrieving the HTML from our response, we use `html_element` to find all listings on the price, then save the monthly rental cost in a list `listings` (B4). We use another for loop  through this list and append the values as new rows in the `real_estate_df` tibble (B5). Finally, we save the results to a CSV called "trulia_data.csv" for future use (B6).
+In the following section, we use a for loop to iterate through each of the zip codes retrieved from HUD for our target cities to retrieve current (B2). We set each zip code (`zip`), the number of bedrooms (`beds`), and a page counter (`current_page`) as paramaters for our GET request, which is called via the custom `throttled_GET` function (B3). Upon retrieving the HTML from our response, we use `html_element` to find all listings on the price, then save the monthly rental cost in a list `listings` (B4). We use another for loop through this list and append the values as new rows in the `real_estate_df` tibble (B5). Finally, we save the results to a CSV called "trulia_data.csv" for future use (B6).
 
 ```{r scrape-trulia}
 
@@ -217,17 +214,11 @@ start <- 1        # start index
 end <- 1          # end index. Use #nrow(zip_codes) to use zip_code length 
 
 # loop through zip codes list
-for (beds in 0:0) {
+for (beds in 0:max_bedrooms) {
   
   for (i in start:end) {
     # get zip code at current index
     zip <- zip_codes[i,]$zip_code
-    # randomly set the delay in seconds
-    delay <- 15 + round(runif(1) * 10)
-    
-    print(delay)
-    # print current zip
-    print(zip)
     
     # B3: build path based on the current zip, beds and page vars
     # and send to our throttled GET request function 
@@ -285,8 +276,7 @@ market_rate_by_zip_and_num_bds <- market_rates |>
 
 ### Combining FMR and Market Rate Dataframes By Zip Code
 
-Now that we have the calculations for the 40th percential of market rate rents, we can combine the data with the FMR data. We use the `right_join` function to join the `metro_fmr_by_zip_and_num_bds` dataframe to the `market_rate_by_zip_and_num_bds` dataframe by zip codes (C3). Because some of the zip codes did not have any active listings on the date we scraped Trulia, using `right_join` will ensure that only the zip codes that had listings will be preserved in our `combined_df_by_zip` dataframe. Next, we use `pivot_longer` to break up each estimated rental cost as a unique observation that can be grouped or filtered by area_name, zip code, apartment size (# of bedrooms), and estimate type (fmr vs market rate)
-
+Now that we have the calculations for the 40th percential of market rate rents, we can combine the data with the FMR data. We use the `right_join` function to join the `metro_fmr_by_zip_and_num_bds` dataframe to the `market_rate_by_zip_and_num_bds` dataframe by zip codes (C3). Because some of the zip codes did not have any active listings on the date we scraped Trulia, using `right_join` will ensure that only the zip codes that had listings will be preserved in our `combined_df_by_zip` dataframe. Next, we use `pivot_longer` to break up each estimated rental cost as a unique observation that can be grouped or filtered by area_name, zip code, apartment size (# of bedrooms), and estimate type (fmr vs market rate). 
 
 ```{r combine-dfs}
 
@@ -294,6 +284,7 @@ Now that we have the calculations for the 40th percential of market rate rents, 
 combined_df_by_zip <- metro_fmr_by_zip_and_num_bds |>
   right_join(market_rate_by_zip_and_num_bds, by= c('zip_code'='zip_code', 'bedrooms'='bedrooms')) |>
   mutate(bedrooms = as.factor(bedrooms))
+
 
 # C4: pivot longer by estimate type
 combined_df_by_zip_and_type <- combined_df_by_zip |>
@@ -309,22 +300,29 @@ combined_df_by_zip_and_type <- combined_df_by_zip |>
 head(combined_df_by_zip_and_type)
 ```
 
-### Plotting the Distribution of Estimate Types
+### Kernel Density of Estimate Types
 
-With the final Below kernel density estimate, which is a smoothed version of the histogram
+With the dataframe tidied, we can start analysing our data. The chart below (C5) shows a kernel density of the distribution of average rents by estimate types (FMR vs Market Rent). Using facets, we can see group data by city and apartment size measured in number of bedrooms. The chart suggests that  market rates generally trail FMR costs for all apartment sizes in the Atlanta Metropolitan area. In the Buffalo metro, market rates appear to be somewhat similar for studios, but market rate rents have a wider spread are somewhat higher than FMR for 1 and 2 bedrooms. In San Diego, the median FMR and market rate rents are somewhat similar, but there is a wider spread of rental costs across zip codes for market rate estimates while FMR rents are more concentrated represented through a higher peak.
 
 ```{r histo-diffs, fig.height=6}
+
+# C5: Calculate Distribution of raw estimates
+mean_rents <- combined_df_by_zip_and_type |>
+  group_by(type, area_name, bedrooms) |> 
+  summarise(mean_rent= mean(rent)
+)
 
 # distribution of fmr vs market reate
 ggplot(combined_df_by_zip_and_type, aes(rent, fill=fct_rev(type), color=fct_rev(type))) +
   geom_density(alpha = .3) +
+  geom_vline(data=mean_rents, aes(xintercept=mean_rent, col=type), linetype = "twodash") +
   theme(
     legend.position = "top", 
     plot.title = element_text(hjust = 0.5),
     plot.subtitle = element_text(hjust = 0.5)
   ) + 
   labs(
-    title = "Density of Average Rents by Estimate Type",
+    title = "Kernel Density of Average Rents by Estimate Type",
     subtitle = "Faceted by Area and Apt. Size (# of Bedrooms)",
     x = "Average Rent",
     y = "Density"
@@ -344,11 +342,14 @@ ggplot(combined_df_by_zip_and_type, aes(rent, fill=fct_rev(type), color=fct_rev(
 
 ```
 
+### Count of Zipcodes by Estimate Type
+
+Next, we can estimate the different between the market rate and FMR estimated rents to calculate the margin of error and to classify which observations (zip codes) have market rate estimates at or below FMR and which are above (C6). We can use this classification system to visualize to calculate and visualize the counts of each estimate type grouped by area, apartment size (number of bedrooms), and classification (at-or-below vs above FMR). Our visualization shows of our 9 groups, only 1- and 2-bedroom apartments in Buffalo had a higher number of zip codes of apartments where market rate rents exceeded FMR.
 
 
-```{r calc-rent-diffs, fig.width=6, fig.height=4}
+```{r calc-rent-diffs, message=FALSE, warning=FALSE, fig.width=6, fig.height=4}
 
-# C3: Calculate Rent Differences by Zip
+# C6: Calculate Rent Differences by Zip
 # create df with the margin of error 
 combined_df_by_zip_diffs <- combined_df_by_zip |>
   mutate(
@@ -357,15 +358,41 @@ combined_df_by_zip_diffs <- combined_df_by_zip |>
   ) |>
   select(-c(fmr, market_rate))
 
+# C7: Counts by Estimate Type
+counts_by_estimate_type <- combined_df_by_zip_diffs |>
+  group_by(area_name, bedrooms, at_or_below_fmr) |>
+  summarise(
+    count_type =  n(),
+  ) |>
+  ungroup() |>
+  arrange(area_name, bedrooms, desc(at_or_below_fmr))
 
+# calc total counts
+combined_df_by_zip_diffs_total_counts <- combined_df_by_zip_diffs |>
+  group_by(area_name, bedrooms) |>
+  summarise(
+    count_total = n(),
+  ) |>
+  ungroup() 
+
+# calculate percent of type per group
+counts_by_estimate_type <- counts_by_estimate_type |>
+  left_join(combined_df_by_zip_diffs_total_counts, by=c("area_name", "bedrooms")) |>
+  mutate(
+    type_ratio = count_type / count_total
+  ) 
+
+# plot
 ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr)) +
   geom_bar(position = position_dodge()) +
+  #geom_text(stat='count', aes(label = after_stat(count),), hjust=-.3, position = position_dodge(width=0.9),  size=3) + 
+  geom_text(data=counts_by_estimate_type, mapping = aes(label = paste(count_type, " (", round(type_ratio * 100, 1), "%)", sep=""), x = count_type), stat="identity", hjust=-.05, position = position_dodge(width=0.9),  size=2.5) + 
   theme(
     legend.position = "top", 
     plot.title = element_text(hjust = 0.5)
   ) +
   labs(
-    title = "Count of Zipcodes by Estimate Type and Apartment Size",
+    title = "Number of Zipcodes by Estimate Type for each Metro Area and Apartment Size",
     x = "# of Apartments",
     y = "Apartment Type (in # of bedrooms)"
   ) + 
@@ -375,12 +402,17 @@ ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr))
     guide = guide_legend(reverse = TRUE) 
   ) +
   facet_wrap(~area_name, ncol=1)
-#  facet_grid(vars(bedrooms), vars(area_name))
-  
+
 ```
 
 
+### Dollar Differences
+
+This next visualization shows a boxplot of the absolute dollar difference between market rate and FMR. This chart supports the rental mismatch we observed earlier for 1- and 2-bedroom apartments in Buffalo. Here we see that apartments exceeding FMR have a higher dollar difference than those at or below FMR. The range of rents for these two groups is also much wider for apartments which may speak to type of aparments available. Interestingly we see wider ranges in market rents for studios in Atlanta and two-bedrooms in San Diego
+
 ```{r fig.height=5}
+
+# C8: Dollar differences
 ggplot(combined_df_by_zip_diffs, aes(abs(margin_of_error), fct_rev(bedrooms), fill=at_or_below_fmr)) +
   geom_boxplot(color="#666666") +
   theme(
@@ -404,10 +436,44 @@ ggplot(combined_df_by_zip_diffs, aes(abs(margin_of_error), fct_rev(bedrooms), fi
 
 
 
+```{r fig.height=5}
+
+
+combined_market_rates <- market_rates  |>
+  left_join(metro_fmr_by_zip_and_num_bds, by= c('zip_code'='zip_code', 'bedrooms'='bedrooms')) |>
+  mutate(
+    bedrooms = as.factor(bedrooms),
+    margin_of_error = market_rate - fmr,
+    at_or_below_fmr = as.factor(fmr >= market_rate)
+  ) 
+
+
+# C8: Dollar differences
+ggplot(combined_market_rates, aes(abs(margin_of_error), fct_rev(bedrooms), fill=at_or_below_fmr)) +
+  geom_boxplot(color="#666666") +
+  theme(
+    legend.position="top", 
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Distribution of Absolute Dollar Difference Between Market Rate and FMR Estimates",
+    x = "Dollar Difference between Market Rate and FMR",
+    y = "Size of Apt. (# of Bedrooms)"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format()) + 
+  scale_fill_discrete(
+    name = element_blank(), 
+    labels=c('Above FMR', 'At or below FMR'),
+    guide = guide_legend(reverse = TRUE) 
+  ) +
+  facet_wrap(~area_name, ncol=3, shrink=FALSE) 
+  # facet_grid(vars(bedrooms), vars(area_name)) 
+```
+
+
 ### C3: Combine FMR and Market Rate for each MSA
 
-
-```{r calc-msa-avg-market-rent}
+```{r calc-msa-avg-market-rent, warning=FALSE}
 
 ### C3: Combine FMR and Market Rate for each MSA
 
@@ -439,6 +505,4 @@ combined_df_by_msa_long <- combined_df_by_msa |>
 head(combined_df_by_msa_long)
 
 ```
-
-
-
+## Summary
