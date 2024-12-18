@@ -1,5 +1,5 @@
 ---
-title: "Final Presentation"
+title: "Fair Market Rents (FMR) vs Market Rate Rents"
 author: "Marco Castro"
 date: "2024-12-16"
 output:
@@ -20,6 +20,7 @@ library(httr2)
 library(stringr)
 library(rvest)
 library(textutils)
+library(formattable)
 
 source("credentials.R")
 
@@ -363,7 +364,7 @@ combined_df_by_zip_diffs <- combined_df_by_zip |>
     margin_of_error = market_rate - fmr,
     at_or_below_fmr = as.factor(fmr >= market_rate)
   ) |>
-  select(-c(fmr, market_rate))
+  select(-c(market_rate))
 
 # Counts by Estimate Type
 counts_by_estimate_type <- combined_df_by_zip_diffs |>
@@ -436,3 +437,83 @@ ggplot(combined_df_by_zip_diffs, aes(abs(margin_of_error), fct_rev(bedrooms), fi
   facet_wrap(~area_name, ncol=3, shrink=FALSE) 
   # facet_grid(vars(bedrooms), vars(area_name)) 
 ```
+
+
+## What is the Median Rent Difference Above FMR? 
+
+```{r median-difference, echo=FALSE, message=FALSE, warning=FALSE}
+
+# C8: Cost Difference
+
+median_diffs <- combined_df_by_zip_diffs |>
+  group_by(area_name, bedrooms, at_or_below_fmr) |>
+  summarise(
+    median_difference = median(margin_of_error)
+  ) |>
+  ungroup() |>
+  mutate(at_or_below_fmr = ifelse(at_or_below_fmr == TRUE, "Median $Diff Below FMR", "Median $Diff Above FMR")) |>
+  pivot_wider(
+    names_from = at_or_below_fmr,
+    values_from = median_difference
+  ) 
+
+median_fmr <- combined_df_by_zip_diffs |>
+  group_by(area_name, bedrooms) |>
+  summarise(
+    median_fmr = median(fmr)
+  ) |>
+  ungroup()
+
+
+median_diffs_df_clean <- median_diffs |>
+  left_join(median_fmr, by=c("area_name", "bedrooms")) |>
+  rename(FMR = median_fmr) |>
+  rename(Area = area_name) |>
+  rename(Bedrooms = bedrooms) |>
+  relocate(FMR, .before=`Median $Diff Above FMR`) |>
+  relocate(`Median $Diff Below FMR`, .before=`Median $Diff Above FMR`) |> 
+  mutate(
+    `FMR` = paste("$", abs(round(`FMR`,0)), sep=""),
+    `Median $Diff Below FMR` = paste("$", abs(round(`Median $Diff Below FMR`,0)), sep=""),
+    `Median $Diff Above FMR` = paste("$", abs(round(`Median $Diff Above FMR`,0)), sep="")
+  ) 
+
+
+groups_of_interest_above_fmr <- median_diffs_df_clean |>
+  filter((Area == 'Buffalo-Cheektowaga-Niagara Falls' & Bedrooms == 1) | (Area == 'Buffalo-Cheektowaga-Niagara Falls' & Bedrooms == 2) ) |>
+  select(-c(`Median $Diff Below FMR`))
+
+print("Groups of Interest where Mark Rate Exceeded FMR")
+formattable(groups_of_interest_above_fmr, 
+            align=c("l","c","c","c","c"),
+            list(
+              Area = formatter("span", style = x ~ style(color = "gray")),
+              `Median $Diff Above FMR`= formatter("span", style = ~ style(color = "red"))
+            )                     
+          )
+
+
+groups_of_interest_below_fmr <- median_diffs_df_clean |>
+  filter((Area == 'San Diego-Carlsbad' & Bedrooms == 2))
+
+print("Groups of Interest where FMR Exceeded Market Rates")
+formattable(groups_of_interest_below_fmr, 
+            align=c("l","c","c","c","c"),
+            list(
+              Area = formatter("span", style = x ~ style(color = "gray")),
+              `Median $Diff Below FMR`= formatter("span", style = ~ style(color = "green")),
+              `Median $Diff Above FMR`= formatter("span", style = ~ style(color = "red"))
+            )                     
+          )
+
+```
+
+
+## Conclusion & Limitations
+
+* Analysis is based on a "snapshot" of parsed data on December 12th showing only a sample of current listings. 
+* Some zip codes had no rental listings available on that particular day. 
+* AJAX pagination issues
+* Should collect real estate data over time to better represent real market conditions. Alt. use time-series data like the Zillow Observed Rent Index (ZORI).
+* Future work: Expand to include 3/4 bedroom apartments and other metropolitan areas
+
