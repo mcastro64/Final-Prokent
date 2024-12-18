@@ -356,7 +356,7 @@ combined_df_by_zip_diffs <- combined_df_by_zip |>
     margin_of_error = market_rate - fmr,
     at_or_below_fmr = as.factor(fmr >= market_rate)
   ) |>
-  select(-c(fmr, market_rate))
+  select(-c(market_rate))
 
 # C7: Counts by Estimate Type
 counts_by_estimate_type <- combined_df_by_zip_diffs |>
@@ -394,7 +394,7 @@ ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr))
   labs(
     title = "Number of Zipcodes by Estimate Type for each Metro Area and Apartment Size",
     x = "# of Apartments",
-    y = "Apartment Type (in # of bedrooms)"
+    y = "Apartment Size (in # of bedrooms)"
   ) + 
   scale_fill_discrete(
     name = element_blank(), 
@@ -435,6 +435,85 @@ ggplot(combined_df_by_zip_diffs, aes(abs(margin_of_error), fct_rev(bedrooms), fi
 ```
 
 
+```{r median-difference, message=FALSE, warning=FALSE}
+library("formattable")
+
+median_diffs <- combined_df_by_zip_diffs |>
+  group_by(area_name, bedrooms, at_or_below_fmr) |>
+  summarise(
+    median_difference = median(margin_of_error)
+  ) |>
+  ungroup() |>
+  mutate(at_or_below_fmr = ifelse(at_or_below_fmr == TRUE, "Below FMR", "Above FMR")) |>
+  pivot_wider(
+    names_from = at_or_below_fmr,
+    values_from = median_difference
+  ) 
+
+median_fmr <- combined_df_by_zip_diffs |>
+  group_by(area_name, bedrooms) |>
+  summarise(
+    median_fmr = median(fmr)
+  ) |>
+  ungroup()
+
+
+median_diffs_table <- median_diffs |>
+  left_join(median_fmr, by=c("area_name", "bedrooms")) |>
+  rename(FMR = median_fmr) |>
+  rename(Area = area_name) |>
+  rename(Bedrooms = bedrooms) |>
+  relocate(FMR, .before=`Above FMR`) |>
+  relocate(`Below FMR`, .before=`Above FMR`) |> 
+  mutate(
+    `FMR` = paste("$", abs(round(`FMR`,0)), sep=""),
+    `Below FMR` = paste("$", abs(round(`Below FMR`,0)), sep=""),
+    `Above FMR` = paste("$", abs(round(`Above FMR`,0)), sep="")
+  ) |>
+  select(-c(`Below FMR`)) |>
+  filter((Area == 'Atlanta-Sandy Springs-Roswell' & Bedrooms == 0) | (Area == 'Buffalo-Cheektowaga-Niagara Falls' & Bedrooms == 1) | (Area == 'Buffalo-Cheektowaga-Niagara Falls' & Bedrooms == 2) | (Area == 'San Diego-Carlsbad' & Bedrooms == 2))
+  
+
+formattable(median_diffs_table, 
+            align=c("l","c","c","c","c"),
+            list(
+              Area = formatter("span", style = x ~ style(color = "gray")),
+              `Below FMR`= color_tile("#DeF7E9", "#DeF7E9"),
+              `Above FMR`= color_tile("#ff7f7f", "#ff7f7f")
+            )                     
+          )
+
+```
+
+```{r}
+
+ggplot() +
+  geom_bar(data=median_diffs, aes(x=`Below FMR`, y=fct_rev(bedrooms), fill="Below FMR"), stat="identity", position = position_stack(reverse = TRUE)) +
+  geom_bar(data=median_diffs, aes(x=`Above FMR`, y=fct_rev(bedrooms), fill="Above FMR"), stat="identity", position = position_stack(reverse = TRUE)) +
+  theme(
+    legend.position="top", 
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = "Median Rent Difference from FMR",  
+    x = "Median Dollar Difference",
+    y = "Apartment Size (in # of bedrooms)"
+  ) + 
+  scale_fill_discrete(
+    name = element_blank(), 
+    guide = guide_legend(reverse = TRUE) 
+  ) + 
+  facet_wrap(~area_name, ncol=3, shrink=FALSE)
+
+```
+
+```{r}
+library(sf)
+buffalo_map <- system.file("GIS/Buffalo.shp", package="sf")
+nc <- st_read(buffalo_map)
+
+
+```
 
 
 ## Conclusion
