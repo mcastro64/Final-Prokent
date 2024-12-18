@@ -155,7 +155,7 @@ metro_fmr_by_zip_and_num_bds <- metro_fmrs |>
     )
   ) |>
   arrange(zip_code) |>
-  filter(bedrooms < max_bedrooms)
+  filter(bedrooms <= max_bedrooms)
 
 metro_fmr_msa_by_num_bds <- metro_fmr_by_zip_and_num_bds |>
   filter(zip_code == 'MSA level')
@@ -408,7 +408,7 @@ ggplot(combined_df_by_zip_diffs, aes(y=fct_rev(bedrooms), fill=at_or_below_fmr))
 
 ### Dollar Differences
 
-This next visualization shows a boxplot of the absolute dollar difference between market rate and FMR. This chart supports the rental mismatch we observed earlier for 1- and 2-bedroom apartments in Buffalo. Here we see that apartments exceeding FMR have a higher dollar difference than those at or below FMR. The range of rents for these two groups is also much wider for apartments which may speak to type of aparments available. Interestingly we see wider ranges in market rents for studios in Atlanta and two-bedrooms in San Diego
+This next visualization shows a boxplot of the absolute dollar difference between market rate and FMR. This chart supports the rental mismatch we observed earlier for 1- and 2-bedroom apartments in Buffalo. Here we see that apartments exceeding FMR have a higher dollar difference than those at or below FMR. The range of rents for these two groups is also much wider for apartments which may speak to type of aparments available. Interestingly we see wider ranges in market rents for studios in Atlanta and two-bedrooms in San Diego.
 
 ```{r fig.height=5}
 
@@ -436,73 +436,5 @@ ggplot(combined_df_by_zip_diffs, aes(abs(margin_of_error), fct_rev(bedrooms), fi
 
 
 
-```{r fig.height=5}
 
-
-combined_market_rates <- market_rates  |>
-  left_join(metro_fmr_by_zip_and_num_bds, by= c('zip_code'='zip_code', 'bedrooms'='bedrooms')) |>
-  mutate(
-    bedrooms = as.factor(bedrooms),
-    margin_of_error = market_rate - fmr,
-    at_or_below_fmr = as.factor(fmr >= market_rate)
-  ) 
-
-
-# C8: Dollar differences
-ggplot(combined_market_rates, aes(abs(margin_of_error), fct_rev(bedrooms), fill=at_or_below_fmr)) +
-  geom_boxplot(color="#666666") +
-  theme(
-    legend.position="top", 
-    plot.title = element_text(hjust = 0.5)
-  ) +
-  labs(
-    title = "Distribution of Absolute Dollar Difference Between Market Rate and FMR Estimates",
-    x = "Dollar Difference between Market Rate and FMR",
-    y = "Size of Apt. (# of Bedrooms)"
-  ) +
-  scale_x_continuous(labels = scales::dollar_format()) + 
-  scale_fill_discrete(
-    name = element_blank(), 
-    labels=c('Above FMR', 'At or below FMR'),
-    guide = guide_legend(reverse = TRUE) 
-  ) +
-  facet_wrap(~area_name, ncol=3, shrink=FALSE) 
-  # facet_grid(vars(bedrooms), vars(area_name)) 
-```
-
-
-### C3: Combine FMR and Market Rate for each MSA
-
-```{r calc-msa-avg-market-rent, warning=FALSE}
-
-### C3: Combine FMR and Market Rate for each MSA
-
-# calculate average market rate for MSA
-market_rate_msa_by_num_bds <- market_rates |>
-  mutate(
-    area_name = case_when(
-      as.integer(zip_code) > 90000 ~ 'San Diego-Carlsbad',
-      as.integer(zip_code) < 20000 ~ 'Buffalo-Cheektowaga-Niagara Falls',
-      TRUE ~ 'Atlanta-Sandy Springs-Roswell'
-    )
-  ) |>
-  group_by(across(all_of(c("area_name", "bedrooms")))) |>
-  summarise(
-    market = mean(market_rate)
-  )
-
-# join fmr and market rate dataframes at the MSA level
-combined_df_by_msa <- metro_fmr_msa_by_num_bds |>
-  right_join(market_rate_msa_by_num_bds, by=c("area_name", "bedrooms"))
-
-combined_df_by_msa_long <- combined_df_by_msa |>
-  pivot_longer(
-    cols = c(fmr, market),
-    names_to = c("type"),
-    values_to = "rent"
-  )
-
-head(combined_df_by_msa_long)
-
-```
-## Summary
+## Conclusion
